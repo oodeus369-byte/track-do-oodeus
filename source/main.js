@@ -15,6 +15,10 @@
 const { Plugin, Notice } = require('obsidian');
 const { initHost } = require('./src/host');
 const { VIEW_TYPE, PAGES, TrackPageView } = require('./src/shell');
+// [R28] Assets embutidos: o BRAT instala só main.js + manifest.json, sem a
+// pasta assets/. Resolver por aqui primeiro mantém todas as imagens funcionando
+// em qualquer cofre; o caminho do vault continua como fallback.
+const EMBEDDED_ASSETS = require('./src/assets-embedded');
 const { VaultNoteModal } = require('./src/vault-notes');
 
 module.exports = class TrackOodeusPlugin extends Plugin {
@@ -109,7 +113,9 @@ module.exports = class TrackOodeusPlugin extends Plugin {
 
   assetPath(rel) {
     if (!rel) return '';
-    return this.app.vault.adapter.getResourcePath(`${this.manifest.dir}/${String(rel).replace(/^\//, '')}`);
+    const key = String(rel).replace(/^\//, '').replace(/\\/g, '/');
+    if (Object.prototype.hasOwnProperty.call(EMBEDDED_ASSETS, key)) return EMBEDDED_ASSETS[key];
+    return this.app.vault.adapter.getResourcePath(`${this.manifest.dir}/${key}`);
   }
 
   // [R2] goPage dest → página. Página corrente = re-render (mimética do reload

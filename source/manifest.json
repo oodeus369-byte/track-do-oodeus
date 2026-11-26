@@ -1,9 +1,9 @@
 {
-  "id": "track-do-odeus",
-  "name": "Track do Oodeus",
-  "version": "1.0.0",
-  "minAppVersion": "1.5.0",
-  "description": "Port fiel do Track Concursos v1.0.6: concursos, cadastro de edital, matéria (tópicos, revisão espaçada, questões), timer, cronograma, flashcards, dashboard, revisões, histórico, simulados, editais premium e ajuda.",
-  "author": "Oodeus",
-  "isDesktopOnly": false
+    "id":  "track-do-odeus",
+    "name":  "Track do Oodeus",
+    "version":  "1.0.3",
+    "minAppVersion":  "1.5.0",
+    "description":  "Port fiel do Track Concursos v1.0.6: concursos, cadastro de edital, matéria (tópicos, revisão espaçada, questões), timer, cronograma, flashcards, dashboard, revisões, histórico, simulados, editais premium e ajuda.",
+    "author":  "Oodeus",
+    "isDesktopOnly":  false
 }

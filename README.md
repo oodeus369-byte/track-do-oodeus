@@ -12,14 +12,14 @@ Plugin do Obsidian — reconstrução fiel do aplicativo **Track Concursos v1.0.
    > O repositório é **público**: não é necessário token do GitHub. (Se sobrar um token conectado de quando era privado, pode remover.)
 2. Em BRAT, escolha **Add beta plugin** e informe o repositório:
    `oodeus369-byte/track-do-oodeus`
-3. Selecione o branch `main` (ou a release mais recente, `v1.0.1`) e confirme.
+3. Selecione a release mais recente, `v1.0.3`, e confirme.
 4. Habilite **Track do Oodeus** em Configurações → Plugins instalados.
 
 > **Importante:** o plugin já instalado manualmente tem o **mesmo ID**. Antes de instalar pelo BRAT no mesmo dispositivo, desative/remova a cópia antiga para não haver duplicidade. No celular, faça isso só depois de confirmar que a sincronização terminou.
 
 ## Instalação manual
 
-Copie `manifest.json`, `main.js` e a pasta `assets/` para:
+Copie `manifest.json` e `main.js` para (os assets já vão embutidos no `main.js`):
 
 ```
 <vault>/.obsidian/plugins/track-do-odeus/
@@ -31,7 +31,7 @@ e habilite o plugin no Obsidian.
 
 - `manifest.json`, `main.js`, `assets/` — plugin pronto para uso (o que o Obsidian carrega).
 - `source/` — código-fonte completo, testes e script de build (sem `node_modules`).
-- Repositório **privado**: não contém `data.json` (dados pessoais) nem backups de dados.
+- Repositório **público**: não contém `data.json` (dados pessoais) nem backups de dados. Desde a v1.0.3 os 92 assets estão embutidos como `data:` no `main.js`, então o plugin funciona em qualquer cofre mesmo sem a pasta `assets/`.
 
 ## Reconstruir o bundle
 

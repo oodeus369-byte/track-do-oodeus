@@ -114,6 +114,14 @@ const PLATFORM_NEUTRALIZE_CSS =
 
 // [R2-port] URLs de assets dentro do theme.css (máscaras de ícone remix-nav).
 function rewriteThemeAssetUrls(css) {
+  const h = typeof window !== 'undefined' ? window.__CT_HOST__ : null;
+  // [R28] Com host que resolve assets (plugin real), troca cada url() pelo
+  // assetUrl — que agora devolve data: dos assets embutidos. Sem assetUrl
+  // (harness que só fornece assetBase), mantém o comportamento antigo.
+  if (h && typeof h.assetUrl === 'function') {
+    return css.replace(/url\((['"]?)assets\/([^'")]+)\1\)/g,
+      (m, q, rel) => 'url(' + q + assetUrlOf('assets/' + rel) + q + ')');
+  }
   return css.replace(/assets\/remix-nav\//g, assetBaseOf());
 }
 
