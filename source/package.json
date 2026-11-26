@@ -1,0 +1,31 @@
+{
+  "name": "track-do-oodeus-recon",
+  "version": "0.1.0",
+  "description": "Reconstrução do Track Concursos como plugin do Obsidian — port 'igualzinho'.",
+  "main": "main.js",
+  "scripts": {
+    "build": "esbuild main.js --bundle --outfile=main.bundle.js --external:obsidian --format=cjs --platform=browser --target=es2018 --loader:.css=text --loader:.html=text --loader:.pagejs=text",
+    "test:r0": "node tests/r0-storage.test.js",
+    "test:r1": "node tests/r1-theme-nav.test.js",
+    "test:r2": "node tests/r2-concursos.test.js",
+    "test:r3": "node tests/r3-cadastro.test.js",
+    "test:r4": "node tests/r4-aba-materia.test.js",
+    "test:r5": "node tests/r5-timer.test.js",
+    "test:r6": "node tests/r6-crono-cycle.test.js",
+    "test:r7": "node tests/r7-ci.test.js",
+    "test:r8": "node tests/r8-flashcards.test.js",
+    "test:r9": "node tests/r9-dashboard.test.js",
+    "test:r10": "node tests/r10-revisoes.test.js",
+    "test:r11": "node tests/r11-historico.test.js",
+    "test:r12": "node tests/r12-simulados.test.js",
+    "test:r13": "node tests/r13-editais.test.js && node tests/r13-ajuda.test.js",
+    "test:r15": "node tests/r15-empty-state.test.js",
+    "test:r16": "node tests/r16-bugs.test.js",
+    "test:r17": "node tests/r17-bugs.test.js",
+    "test:r18": "node tests/r18-residuos.test.js"
+  },
+  "devDependencies": {
+    "esbuild": "^0.21.0",
+    "jsdom": "^29.1.1"
+  }
+}

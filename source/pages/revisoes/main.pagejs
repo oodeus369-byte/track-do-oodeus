@@ -1,0 +1,476 @@
+/**
+ * Track do Oodeus - [R10-port] script principal de revisoes.html
+ * (original 385-822 + seams). Script inline CLÁSSICO top-level, SEM IIFE e
+ * SEM 'use strict' (como o original); o wrapper do shell
+ * (render-util.runPageScripts) faz a ponte de nomes para window — os onclick
+ * inline enxergam as funções e as let/const top-level via accessors.
+ *
+ * Sem correções D1-D12 (doc-mestre R10): dead code verbatim (pctClass
+ * definida e nunca chamada, D10; border-left do .rev-card anulado pelo
+ * border inline do template, D11; placeholder inerte do date input, D12) e a
+ * duplicação viva replicada (badge via document.querySelector('.nav-badge')
+ * — 1º do DOM = #revBadge por acaso da ordem; concurso-nome/banca escritos
+ * pela IIFE sidebar E por render()).
+ *
+ * Seams [R10-port]: goPage local (precedente aba-materia script2); redirect
+ * sem cId (386 — sem return: o location.href do original não interrompe a
+ * execução); abrirAlvoRevisao → aba_materia.html?foco=… (416);
+ * aplicarFocoRevisaoUrl lê window.__CT_PAGE_SEARCH__ || location.search (566,
+ * padrão aba-materia 1297) — o foco ?revisaoId= com .review-focus 3200ms.
+ *
+ * Ordem de carregamento do original: data.js (326) → IIFE sidebar (327-383)
+ * → este script (384-823) → nav.js (827) → timer-popup.js (828). No plugin:
+ * data.js roda no onload; nav boot ANTES da cadeia (desvio documentado no
+ * render-util R3); cadeia = [IIFE sidebar, este script, timer-popup.pagejs]
+ * — o timer-popup entra por último como o <script src> 828; o
+ * iniciarCronometroRevisao cobre o timing com retry de 60ms (419-443,
+ * verbatim). Popup de revisão: confirmarRevisao (data custom prioridade →
+ * concluirRevisao), adiarRevisao reutiliza o popup trocando handlers
+ * (768-787), excluirRevisao com CT.confirm (809-816).
+ */
+const cId = sessionStorage.getItem('ct_concurso_ativo');
+// [R10-port] Navegação entre páginas (mesmo contrato do goPage do nav.js).
+function goPage(dest) {
+  if (window.__CT_NAV_GO_PAGE) { window.__CT_NAV_GO_PAGE(dest); return; }
+  window.location.href = dest;
+}
+// Seam do redirect (orig 386): o location.href do original NÃO interrompe a
+// execução do script (a navegação só é commitada depois) — sem return, o
+// boot segue até render() como no original.
+if (!cId) goPage('concursos.html');
+
+let _revTopicoId = null;
+let _focusRevisaoAplicado = false;
+
+function pctColor(p){return CT.pctColor?CT.pctColor(p):'var(--text3)';}
+function pctClass(p){return CT.pctClass?CT.pctClass(p):'none';}
+function diasAtraso(d){return Math.floor((new Date(CT._today())-new Date(d))/86400000);}
+function fmtDate(d){const p=d.split('-');return p[2]+'/'+p[1]+'/'+p[0];}
+function jsArg(v){return String(v||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");}
+
+function abrirAlvoRevisao(event, alvoId) {
+  if (event && event.ctrlKey) {
+    event.stopPropagation();
+    CT.copy(event.currentTarget.innerText);
+    return;
+  }
+  const ctx = CT.getContextoRevisao(alvoId);
+  const materiaId = ctx.materia?.id || ctx.topico?.materiaId || ctx.subtopico?.materiaId || null;
+  const targetId = ctx.subtopId || ctx.topicoId;
+  if (!materiaId || !targetId) return;
+
+  if (ctx.concursoId) sessionStorage.setItem('ct_concurso_ativo', ctx.concursoId);
+  sessionStorage.setItem('ct_materia_ativa', materiaId);
+
+  const params = new URLSearchParams({
+    foco: ctx.subtopId ? 'subtopico' : 'topico',
+    id: targetId
+  });
+  if (ctx.topicoId) params.set('topicoId', ctx.topicoId);
+  goPage('aba_materia.html?' + params.toString()); // [R10-port]
+}
+
+function iniciarCronometroRevisao(event, alvoId) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  const ctx = CT.getContextoRevisao(alvoId);
+  if (!ctx) return;
+  const preset = {
+    materiaId: ctx.materia?.id || ctx.topico?.materiaId || ctx.subtopico?.materiaId || '',
+    topicoId: ctx.topicoId || ctx.topico?.id || '',
+    subtopicoId: ctx.subtopId || '',
+    tipoEstudo: 'Estudo',
+    autoStart: true
+  };
+  if (!preset.materiaId && !preset.topicoId) return;
+
+  if (typeof window.openFreeTimerPreset === 'function') {
+    window.openFreeTimerPreset(preset);
+    return;
+  }
+
+  setTimeout(() => {
+    if (typeof window.openFreeTimerPreset === 'function') window.openFreeTimerPreset(preset);
+  }, 60);
+}
+
+function cardRevisao(r, tipo) {
+  const ctx = CT.getContextoRevisao(r);
+  const t = ctx.topico;
+  if (!t) return '';
+  const mat = ctx.materia;
+  const alvoId = ctx.subtopId || ctx.topicoId;
+  const q = ctx.subtopId
+    ? CT.calcStats(CT.getQuestoes({ subtopId: ctx.subtopId }))
+    : CT.calcStats(CT.getQuestoes({ topicoId: t.id }));
+
+  const badge = tipo==='atrasada'
+    ? `<span style="background:rgba(245,90,90,0.1);border:1px solid var(--red);border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;color:var(--red);font-family:var(--mono)">🔴 ${diasAtraso(r.data)}d atrasada</span>`
+    : tipo==='hoje'
+    ? `<span style="background:rgba(245,200,66,0.1);border:1px solid var(--yellow);border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;color:var(--yellow);font-family:var(--mono)">🟡 Hoje</span>`
+    : `<span style="background:rgba(79,142,247,0.1);border:1px solid var(--accent);border-radius:20px;padding:3px 10px;font-size:12px;font-weight:600;color:var(--accent);font-family:var(--mono)">📅 ${fmtDate(r.data)}</span>`;
+
+  const pctBadge = q.pct!=null
+    ? `<span style="background:var(--bg3);border:1px solid var(--border);border-radius:20px;padding:3px 10px;font-size:12px;font-weight:700;color:${pctColor(q.pct)};font-family:var(--mono)">${q.pct}%</span>`
+    : '';
+  const tipoClass = tipo === 'futura' ? 'proxima' : tipo;
+
+  return `
+  <div class="rev-card ${tipoClass}" data-revisao-id="${escapeHtml(r.id || '')}" style="background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:16px 20px;display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+    <div style="flex:1;min-width:0">
+      <div title="Abrir na aba da matéria" style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer" onclick="abrirAlvoRevisao(event,'${jsArg(alvoId)}')">${ctx.nome}</div>
+      <div style="font-size:12px;color:var(--text3)">${mat ? mat.nome + (ctx.subtopId ? ' • ' + t.nome : '') : '—'}</div>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex-shrink:0">
+      <button type="button" class="btn-crono-livre" title="Iniciar cronômetro livre para esta revisão" onclick="iniciarCronometroRevisao(event,'${jsArg(alvoId)}')">&#9201;&#65039;</button>
+      ${badge}
+      ${pctBadge}
+      ${tipo!=='futura'?`
+      <button onclick="adiarRevisao('${alvoId}')"
+        style="padding:6px 14px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text3);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s"
+        onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
+        onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text3)'">Adiar</button>
+      <button onclick="abrirPopupRevisao('${alvoId}')"
+        style="padding:6px 14px;border:none;border-radius:8px;background:linear-gradient(135deg,var(--green),var(--green2));color:#fff;font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer">✓ Revisei</button>
+      <button onclick="excluirRevisao('${r.id}')"
+        style="padding:6px 10px;border:1px solid rgba(245,90,90,0.35);border-radius:8px;background:rgba(245,90,90,0.08);color:var(--red);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer">Excluir</button>`
+      :`<button onclick="abrirPopupRevisao('${alvoId}')"
+        style="padding:6px 14px;border:none;border-radius:8px;background:var(--bg3);border:1px solid var(--border);color:var(--text3);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer">Revisar agora</button>
+      <button onclick="excluirRevisao('${r.id}')"
+        style="padding:6px 10px;border:1px solid rgba(245,90,90,0.35);border-radius:8px;background:rgba(245,90,90,0.08);color:var(--red);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer">Excluir</button>`}
+    </div>
+  </div>`;
+}
+
+function render() {
+  const rev = CT.classificarRevisoes();
+
+  // Filtra pelo concurso ativo
+  function filtraConcurso(lista) {
+    return lista.filter(r => {
+      const ctx = CT.getContextoRevisao(r);
+      return ctx.concursoId === cId;
+    });
+  }
+
+  const atrasadas = filtraConcurso(rev.atrasadas);
+  const hoje      = filtraConcurso(rev.hoje);
+  const futuras   = filtraConcurso(rev.futuras);
+  const total     = atrasadas.length + hoje.length + futuras.length;
+
+  // Sumário
+  document.getElementById('cntAtrasadas').textContent = atrasadas.length;
+  document.getElementById('cntHoje').textContent      = hoje.length;
+  document.getElementById('cntFuturas').textContent   = futuras.length;
+
+  // Badge sidebar
+  const badge = document.querySelector('.nav-badge');
+  const urgentes = atrasadas.length + hoje.length;
+  if (badge) badge.textContent = urgentes > 0 ? urgentes : '';
+
+  // Subtítulo
+  const c = CT.getConcurso(cId);
+  document.getElementById('revSub').textContent = c ? c.nome + ' — ' + total + ' revisão(ões) pendente(s)' : '';
+
+  // Sidebar info
+  if (c) {
+    document.querySelector('.concurso-nome').textContent = c.nome;
+    document.querySelector('.concurso-banca').textContent = c.banca || '—';
+  }
+
+  // Empty state
+  document.getElementById('emptyState').style.display = total === 0 ? '' : 'none';
+
+  // Seção atrasadas
+  const secAt = document.getElementById('secAtrasadas');
+  if (atrasadas.length) {
+    secAt.style.display = '';
+    document.getElementById('lblAtrasadas').textContent = atrasadas.length;
+    document.getElementById('listaAtrasadas').innerHTML = atrasadas
+      .sort((a,b)=>a.data.localeCompare(b.data))
+      .map(r => cardRevisao(r,'atrasada')).join('');
+  } else secAt.style.display = 'none';
+
+  // Seção hoje
+  const secHj = document.getElementById('secHoje');
+  if (hoje.length) {
+    secHj.style.display = '';
+    document.getElementById('lblHoje').textContent = hoje.length;
+    document.getElementById('listaHoje').innerHTML = hoje.map(r => cardRevisao(r,'hoje')).join('');
+  } else secHj.style.display = 'none';
+
+  // Seção futuras
+  const secFt = document.getElementById('secFuturas');
+  if (futuras.length) {
+    secFt.style.display = '';
+    document.getElementById('listaFuturas').innerHTML = futuras
+      .sort((a,b)=>a.data.localeCompare(b.data))
+      .map(r => cardRevisao(r,'futura')).join('');
+  } else secFt.style.display = 'none';
+
+  // Chamar novo alerta de rendimento no topo
+  renderRendimentoAlerts();
+  aplicarFocoRevisaoUrl();
+}
+
+function aplicarFocoRevisaoUrl() {
+  if (_focusRevisaoAplicado) return;
+  const revisaoId = new URLSearchParams(window.__CT_PAGE_SEARCH__ || location.search).get('revisaoId'); // [R10-port] seam location.search
+  if (!revisaoId) return;
+  const alvo = Array.from(document.querySelectorAll('[data-revisao-id]'))
+    .find(el => el.getAttribute('data-revisao-id') === revisaoId);
+  if (!alvo) return;
+  _focusRevisaoAplicado = true;
+  setTimeout(() => {
+    alvo.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    alvo.classList.add('review-focus');
+    setTimeout(() => alvo.classList.remove('review-focus'), 3200);
+  }, 80);
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function renderRendimentoAlerts() {
+  var container = document.getElementById('secRendimentoAlerts');
+  var list = document.getElementById('rendimentoAlertsList');
+  if (!container || !list) return;
+
+  var cId = sessionStorage.getItem('ct_concurso_ativo');
+  if (!cId) {
+    container.style.display = 'none';
+    return;
+  }
+
+  var materias = CT.getMaterias(cId) || [];
+  var allQuestions = CT.getQuestoes({ concursoId: cId }) || [];
+  var focusConfig = getFocusAlertsConfig(cId);
+
+  var alerts = [];
+
+  function getFocusAlertsConfig(concursoId) {
+    var saved = {};
+    try {
+      saved = JSON.parse(localStorage.getItem('ct_cronograma_inteligente_' + concursoId) || '{}') || {};
+    } catch (e) {
+      saved = {};
+    }
+    var goal = parseInt(saved.focusAlertsCustomGoal, 10);
+    if (isNaN(goal)) goal = 80;
+    goal = Math.min(99, Math.max(66, goal));
+    return {
+      customEnabled: !!saved.focusAlertsCustomEnabled,
+      customGoal: goal
+    };
+  }
+
+  function buildRendimentoAlert(pct, resolvidas) {
+    if (resolvidas < 5 || pct == null) return null;
+    if (pct <= 65) {
+      return {
+        tipo: 'critico',
+        badgeClass: 'r',
+        detalhe: 'Rendimento baixo em questões: ' + pct + '% de acertos nas últimas ' + resolvidas + ' questões.'
+      };
+    }
+    if (focusConfig.customEnabled && pct < focusConfig.customGoal) {
+      return {
+        tipo: 'abaixo_meta',
+        badgeClass: 'y',
+        detalhe: 'Rendimento abaixo da sua meta: ' + pct + '% de acertos nas últimas ' + resolvidas + ' questões (meta: ' + focusConfig.customGoal + '%).'
+      };
+    }
+    return null;
+  }
+
+  materias.forEach(function (materia) {
+    var topicos = CT.getTopicos(materia.id) || [];
+    topicos.forEach(function (topico) {
+      var subs = CT.getSubtopicos(topico.id) || [];
+      if (subs.length) {
+        subs.forEach(function (sub) {
+          var qs = allQuestions.filter(function (q) {
+            return String(q.subtopId || q.subtopicoId || '') === String(sub.id);
+          });
+          var general = CT.calcStats(qs);
+          var recent = calcRecent(qs, 30);
+          var resolvidas = recent.resolvidas || general.resolvidas || 0;
+          var pct = recent.pct != null ? recent.pct : (general.pct != null ? general.pct : null);
+          var alert = buildRendimentoAlert(pct, resolvidas);
+          if (alert) {
+            alerts.push({
+              materiaNome: materia.nome,
+              nome: sub.nome || 'Subtópico',
+              pct: pct,
+              alvoId: sub.id,
+              tipo: alert.tipo,
+              badgeClass: alert.badgeClass,
+              detalhe: alert.detalhe
+            });
+          }
+        });
+      } else {
+        var qs = allQuestions.filter(function (q) {
+          return String(q.topicoId || '') === String(topico.id) && !(q.subtopId || q.subtopicoId);
+        });
+        var general = CT.calcStats(qs);
+        var recent = calcRecent(qs, 30);
+        var resolvidas = recent.resolvidas || general.resolvidas || 0;
+        var pct = recent.pct != null ? recent.pct : (general.pct != null ? general.pct : null);
+        var alert = buildRendimentoAlert(pct, resolvidas);
+        if (alert) {
+          alerts.push({
+            materiaNome: materia.nome,
+            nome: topico.nome || 'Tópico',
+            pct: pct,
+            alvoId: topico.id,
+            tipo: alert.tipo,
+            badgeClass: alert.badgeClass,
+            detalhe: alert.detalhe
+          });
+        }
+      }
+    });
+  });
+
+  function calcRecent(qs, limit) {
+    var sorted = qs.slice().sort(function (a, b) {
+      var da = a.horaInicio || a.createdAt || a.updatedAt || '';
+      var db = b.horaInicio || b.createdAt || b.updatedAt || '';
+      return db.localeCompare(da);
+    });
+    var take = sorted.slice(0, limit);
+    var resolvidas = 0, acertos = 0;
+    take.forEach(function (q) {
+      resolvidas += Number(q.resolvidas) || 0;
+      acertos += Number(q.acertos) || 0;
+    });
+    var pct = resolvidas > 0 ? Math.round((acertos / resolvidas) * 100) : null;
+    return { resolvidas: resolvidas, pct: pct };
+  }
+
+  if (!alerts.length) {
+    container.style.display = 'none';
+    return;
+  }
+
+  alerts.sort(function (a, b) {
+    var order = { critico: 0, abaixo_meta: 1 };
+    var ao = order[a.tipo] || 9;
+    var bo = order[b.tipo] || 9;
+    if (ao !== bo) return ao - bo;
+    return (a.pct || 0) - (b.pct || 0);
+  });
+
+  container.style.display = '';
+  list.innerHTML = alerts.map(function (alert) {
+    var jsId = String(alert.alvoId || '').replace(/'/g, "\\'");
+    var badgeClass = alert.badgeClass || 'r';
+    return '<div style="background:var(--bg2); border:1px solid var(--border); border-radius:10px; padding:12px 16px; display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px;">'
+      + '  <div style="min-width:0; flex:1; text-align:left;">'
+      + '    <div style="font-size:11px; font-weight:700; color:var(--text3); text-transform:uppercase; letter-spacing:0.5px;">' + escapeHtml(alert.materiaNome) + '</div>'
+      + '    <div style="font-size:14px; font-weight:700; color:var(--text); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">' + escapeHtml(alert.nome) + '</div>'
+      + '    <div style="font-size:12px; color:var(--text3); margin-top:4px;">' + escapeHtml(alert.detalhe) + '</div>'
+      + '  </div>'
+      + '  <div style="display:flex; align-items:center; gap:12px; flex-shrink:0;">'
+      + '    <span class="pct-badge ' + badgeClass + '" style="font-size:12px; font-weight:700; padding:4px 8px;">' + alert.pct + '%</span>'
+      + '    <button onclick="abrirAlvoRevisao(event,\'' + jsId + '\')" class="btn-revisar" style="padding:6px 12px; border-radius:7px; border:none; background:linear-gradient(135deg,var(--accent),var(--accent2)); color:#fff; font-family:var(--sans); font-size:12px; font-weight:700; cursor:pointer;">Revisar</button>'
+      + '  </div>'
+      + '</div>';
+  }).join('');
+}
+
+function abrirPopupRevisao(topicoId) {
+  _revTopicoId = topicoId;
+  const ctx = CT.getContextoRevisao(topicoId);
+  const t = ctx && ctx.nome ? { nome: ctx.nome } : null;
+  document.getElementById('popupTopico').textContent = t ? t.nome : '—';
+  document.getElementById('popupDataCustom').value = '';
+  document.querySelectorAll('.popup-opt').forEach((o,i) => o.classList.toggle('selected', i===0));
+  document.getElementById('popupOverlay').classList.add('visible');
+}
+
+function confirmarRevisao(agendar) {
+  if (!_revTopicoId) return;
+  let proximaData = null;
+  if (agendar) {
+    const custom = document.getElementById('popupDataCustom').value;
+    if (custom) {
+      proximaData = custom;
+    } else {
+      const sel = document.querySelector('.popup-opt.selected .popup-opt-num');
+      if (sel) {
+        const d = new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate() + parseInt(sel.textContent));
+        proximaData = CT._dateString(d);
+      }
+    }
+  }
+  CT.concluirRevisao(_revTopicoId, proximaData);
+  closePopup();
+  render();
+}
+
+function adiarRevisao(topicoId) {
+  // Abre popup mas no modo "adiar" — só reagenda sem marcar como concluída
+  _revTopicoId = topicoId;
+  const ctx = CT.getContextoRevisao(topicoId);
+  const t = ctx && ctx.nome ? { nome: ctx.nome } : null;
+  document.getElementById('popupTopico').textContent = '📅 Adiar: ' + (t ? t.nome : '—');
+  document.getElementById('popupDataCustom').value = '';
+  document.querySelectorAll('.popup-opt').forEach((o,i) => o.classList.toggle('selected', i===0));
+  document.getElementById('popupOverlay').classList.add('visible');
+  // Marca que é adiar, não revisar
+  document.querySelector('.popup-btn-ok').onclick = () => adiarConfirmar();
+  document.querySelector('.popup-btn-skip').textContent = 'Cancelar';
+  document.querySelector('.popup-btn-skip').onclick = () => {
+    closePopup();
+    // Restaura botões
+    document.querySelector('.popup-btn-ok').onclick = () => confirmarRevisao(true);
+    document.querySelector('.popup-btn-skip').textContent = 'Não revisar mais';
+    document.querySelector('.popup-btn-skip').onclick = () => confirmarRevisao(false);
+  };
+}
+
+function adiarConfirmar() {
+  const custom = document.getElementById('popupDataCustom').value;
+  let novaData;
+  if (custom) {
+    novaData = custom;
+  } else {
+    const sel = document.querySelector('.popup-opt.selected .popup-opt-num');
+    const dias = sel ? parseInt(sel.textContent) : 7;
+    const d = new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate() + dias);
+    novaData = CT._dateString(d);
+  }
+  CT.agendarRevisao(_revTopicoId, novaData);
+  closePopup();
+  // Restaura botões
+  document.querySelector('.popup-btn-ok').onclick = () => confirmarRevisao(true);
+  document.querySelector('.popup-btn-skip').textContent = 'Não revisar mais';
+  document.querySelector('.popup-btn-skip').onclick = () => confirmarRevisao(false);
+  render();
+}
+
+async function excluirRevisao(revisaoId) {
+  if (!(await CT.confirm('Excluir esta revisão agendada?', { title: 'Excluir revisão', confirmLabel: 'Excluir' }))) return;
+  if (!CT.excluirRevisao(revisaoId)) {
+    alert('Não foi possível excluir a revisão.');
+    return;
+  }
+  render();
+}
+
+function closePopup() { const el = document.getElementById('popupOverlay'); if (el) el.classList.remove('visible'); }
+function closeOutside(e) { if (e.target===document.getElementById('popupOverlay')) closePopup(); }
+function selOpt(el) { document.querySelectorAll('.popup-opt').forEach(o=>o.classList.remove('selected')); el.classList.add('selected'); }
+
+render();

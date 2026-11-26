@@ -1,0 +1,140 @@
+<!-- Track do Oodeus — [R13-port] body de ajuda.html (linhas 483-605 do
+     original www/ajuda.html). Adaptações: onclick de navegação
+     location.href → goPage (8 pontos simples: logo 486 + nav-items
+     490/491/492/493/495/496/497 — o item Ajuda 497 navega para a própria
+     página, como no original) + 1 especial (Flashcards 494:
+     sessionStorage.setItem('ct_dashboard_tab','flashcards') PRESERVADO +
+     goPage('dashboard.html#flashcards') — hash preservado pelo navigateTo
+     desde a R9); e na linha 605 a tag cloudflare email-decode (D4, externa
+     inexistente — verbatim; inerte porque tags <script> injetadas via
+     innerHTML não executam) fica e o <script src="data.js"> da MESMA linha
+     é removido (data.js roda no onload do plugin). <img src="assets/…">
+     mantém o caminho relativo do original — o shell reescreve na
+     renderização. Verbatim de propósito: sidebar idêntica às outras
+     páginas (com "—" sem concurso), card GitHub com clone do botão Star,
+     contato PIX com <s> riscado, footer "Vedada modificação...", toast
+     default "Chave PIX copiada" (§4.3).
+-->
+
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <img src="assets/Track Concursos logo.png" alt="Track Concursos" class="brand-logo" onclick="goPage('concursos.html')">
+  </div>
+  <nav class="nav">
+    <div class="nav-label">Menu</div>
+    <div class="nav-item" onclick="goPage('concursos.html')" style="cursor:pointer"><span class="icon"><img src="assets/michel-m-icon.png" alt="" style="width:18px;height:18px;object-fit:contain;display:block"></span> Meus Concursos</div>
+    <div class="nav-item" onclick="goPage('dashboard.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="dashboard" aria-hidden="true"></span> Dashboard</div>
+    <div class="nav-item" id="navCronogramaInteligente" onclick="goPage('cronograma_inteligente.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="cronograma" aria-hidden="true"></span> Cronograma Inteligente</div>
+    <div class="nav-item" onclick="goPage('revisoes.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="revisoes" aria-hidden="true"></span> Revisões <span class="nav-badge" id="revBadge" style="display:none">0</span></div>
+    <div class="nav-item" id="navFlashcardsDashboard" onclick="sessionStorage.setItem('ct_dashboard_tab','flashcards');goPage('dashboard.html#flashcards')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="flashcards" aria-hidden="true"></span> Flashcards <span class="nav-badge" id="flashTabBadge" style="display:none">0</span></div>
+    <div class="nav-item" onclick="goPage('historico.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="historico" aria-hidden="true"></span> Métricas</div>
+    <div class="nav-item" onclick="goPage('simulados.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="simulados" aria-hidden="true"></span> Simulados</div>
+    <div class="nav-item active" onclick="goPage('ajuda.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="ajuda" aria-hidden="true"></span> Ajuda</div>
+  </nav>
+  <div style="margin:0 12px 8px;text-align:center">
+    <div style="font-size:12px;color:var(--text3);line-height:1.6">
+      <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Desenvolvido por <img src="assets/logoMichelSoftwares.png?v=1" alt="Michel Softwares" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>
+      <span style="opacity:0.7">powered by Antigravity Gemini</span>
+    </div>
+  </div>
+  <div class="sidebar-concurso">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <div id="sideLogoImg" style="width:32px;height:32px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">📋</div>
+      <div style="min-width:0">
+        <div class="concurso-nome" id="sideNome">—</div>
+        <div class="concurso-banca" id="sideBanca">—</div>
+      </div>
+    </div>
+    <div class="timer-box">
+      <div class="timer-num" id="sideTimer">—</div>
+      <div class="timer-label" id="sideTimerLabel">dias para a prova</div>
+    </div>
+  </div>
+</aside>
+
+<main class="main">
+
+  <div class="page-title"><span class="tc-heading-icon tc-nav-icon" data-nav-icon="ajuda" aria-hidden="true"></span>Ajuda & Contato</div>
+  <div class="page-sub">Saiba como usar o Track Concursos, baixar versões oficiais e enviar feedbacks ou sugestões.</div>
+
+  <!-- SOFTWARE CARD -->
+  <div class="dev-card-link" title="Página oficial do projeto no GitHub" onclick="window.open('https://github.com/michel-softwares/track-concursos','_blank','noopener')">
+    <div class="dev-card">
+      <div class="dev-avatar" aria-hidden="true">
+        <img src="assets/logo-oficial-track-concursos.png?v=1.0.6" alt="Track Concursos">
+      </div>
+      <div class="dev-info">
+        <div class="dev-name" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+          Track Concursos 
+          <div class="gh-btn-container" onclick="event.stopPropagation(); window.open('https://github.com/michel-softwares/track-concursos','_blank','noopener')">
+            <div class="gh-btn">
+              <svg class="gh-icon" viewBox="0 0 16 16" width="12" height="12" style="margin-right: 3px; vertical-align: text-bottom;">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+              </svg>
+              <span>Star</span>
+            </div>
+            <div class="gh-count" id="github-stars-badge">
+              0
+            </div>
+          </div>
+        </div>
+        <div class="dev-tagline">
+          Esse software é um projeto gratuito para uso pessoal. É muito importante que apoie o projeto dando uma estrela no GitHub.<br>
+          Para sua segurança, baixe o programa e futuras atualizações pela página oficial do Projeto no GitHub ou no site <a href="https://track-concursos.github.io" target="_blank" onclick="event.stopPropagation(); window.open('https://track-concursos.github.io','_blank','noopener')" style="color:var(--accent);text-decoration:none;font-weight:600">track-concursos.github.io</a>.<br>
+          Todos os dados são armazenados localmente.
+        </div>
+        <div class="dev-badges" style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <span class="dev-badge" style="color:var(--accent2);border-color:rgba(124,92,252,0.3)">powered by Antigravity Gemini</span>
+          <a class="release-note-card" href="https://github.com/michel-softwares/track-concursos/releases/tag/v1.0.6" target="_blank" rel="noopener" onclick="openReleaseNotes(event)">Notas da atualização v1.0.6</a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONTATO -->
+  <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:14px">📬 Contato</div>
+  <div class="contact-grid">
+    <a href="#" class="contact-card" onclick="copyEmailAddress(event)">
+      <div class="contact-icon">📧</div>
+      <div>
+        <div class="contact-title">E-mail</div>
+        <div class="contact-sub">
+          <strong style="color:var(--text)">michel.araujo.py@gmail.com</strong><br>
+          <span style="color:var(--text2);font-size:11px">Use este email para dúvidas, feedbacks, sugestões ou contato profissional.</span>
+        </div>
+      </div>
+    </a>
+    <a href="#" class="contact-card" onclick="copyPixKey(event)">
+      <div class="contact-icon">☕</div>
+      <div>
+        <div class="contact-title">Buy Me <s>a Coffee</s> Claude tokens</div>
+        <div class="contact-sub" style="font-size:11px">Esse software foi criado com auxílio de IA, se gostou e foi útil para você, considere me apoiar financeiramente para expandir a aplicação para outras plataformas como Mobile e Web!<br><strong style="color:var(--text)">Chave PIX: michelaraujo100@gmail.com (clique para copiar)</strong></div>
+      </div>
+    </a>
+  </div>
+
+  <!-- DICAS DE USO (GUIAS DINÂMICOS) -->
+  <div class="tips-section" style="background: transparent; border: none; padding: 0; box-shadow: none;">
+    <div class="tips-title" style="font-size: 18px; margin-bottom: 20px;">💡 Como tirar o máximo do Track Concursos</div>
+    <div class="guides-grid" id="guidesGrid">
+      <div style="text-align: center; padding: 30px; color: var(--text3); font-size: 13px;">Carregando guias de uso...</div>
+    </div>
+  </div>
+
+  <div class="powered">
+    <span class="powered-brand">Track Concursos — Desenvolvido por <img src="assets/logoMichelSoftwares.png?v=1" alt="Michel Softwares" style="height:44px;width:auto;max-width:260px;vertical-align:middle"></span><br>
+    <span class="powered-meta">powered by Antigravity Gemini</span><br>
+    <span style="font-size:12px;color:var(--text3)">Uso pessoal gratuito • Copyright (c) 2026 Michel Araujo • Vedada modificação ou comercialização sem autorização.</span><br>
+    <span style="font-size:12px;color:var(--text3)">Todos os dados são armazenados localmente no seu computador.</span>
+  </div>
+
+</main>
+
+<div id="copyToast" class="copy-toast" aria-live="polite">
+  <div class="copy-toast-icon">✓</div>
+  <div>
+    <div id="copyToastTitle" class="copy-toast-title">Chave PIX copiada</div>
+    <div id="copyToastText" class="copy-toast-text">michelaraujo100@gmail.com pronta para colar.</div>
+  </div>
+</div>
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script>

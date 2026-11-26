@@ -1,0 +1,643 @@
+
+  <div class="bg-decoration">
+    <div class="bg-blob b1"></div>
+    <div class="bg-blob b2"></div>
+    <div class="bg-grid"></div>
+  </div>
+
+  <div class="page">
+
+    <!-- LEFT PANEL -->
+    <aside class="left-panel">
+<!-- Track do Oodeus — [R3-port] body de cadastro_edital.html (linhas 1187–1821 do
+     baseline src/pages/cadastro_edital.html.baseline). Adaptações: onclick de
+     navegação location.href → goPage (1 ponto: back-btn); <img src="assets/…">
+     mantém o caminho relativo do original — o shell reescreve na renderização.
+     Verbatim de propósito (dead code e assimetrias, etapa-05 §2.8): a_data com
+     value="2026-10-15" hardcoded; toggle "Destaque de proximidade" ignorado;
+     toggle "Contar nas estatísticas" do wizard ativo sem id (ignorado);
+     r_nota_corte fantasma (input não existe — só leitura via edição). -->
+      <button class="back-btn" onclick="goPage('concursos.html')">← Voltar aos concursos</button>
+      <div class="left-title" id="leftTitle">Etapas do cadastro</div>
+
+      <!-- STEPS ATIVO -->
+      <div class="steps" id="stepsAtivo">
+        <div class="step-item active" onclick="goStep(1)">
+          <div class="step-dot">1</div>
+          <div class="step-info">
+            <div class="step-name">Informações gerais</div>
+            <div class="step-desc">Nome, logos e banca</div>
+          </div>
+        </div>
+        <div class="step-item" onclick="goStep(2)">
+          <div class="step-dot">2</div>
+          <div class="step-info">
+            <div class="step-name">Data da prova</div>
+            <div class="step-desc">Timer ou modo pré-edital</div>
+          </div>
+        </div>
+        <div class="step-item" onclick="goStep(3)">
+          <div class="step-dot">3</div>
+          <div class="step-info">
+            <div class="step-name">Importar edital</div>
+            <div class="step-desc">JSON ou cadastro manual</div>
+          </div>
+        </div>
+        <div class="step-item" onclick="goStep(4)">
+          <div class="step-dot">4</div>
+          <div class="step-info">
+            <div class="step-name">Revisar matérias</div>
+            <div class="step-desc">Confirmar tópicos importados</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEPS REALIZADO -->
+      <div class="steps" id="stepsRealizado" style="display:none">
+        <div class="step-item active" onclick="goStepR(1)">
+          <div class="step-dot">1</div>
+          <div class="step-info">
+            <div class="step-name">Informações básicas</div>
+            <div class="step-desc">Nome, banca e data</div>
+          </div>
+        </div>
+        <div class="step-item" onclick="goStepR(2)">
+          <div class="step-dot">2</div>
+          <div class="step-info">
+            <div class="step-name">Resultado</div>
+            <div class="step-desc">Aprovado, CR ou reprovado</div>
+          </div>
+        </div>
+        <div class="step-item" onclick="goStepR(3)">
+          <div class="step-dot">3</div>
+          <div class="step-info">
+            <div class="step-name">Gabarito</div>
+            <div class="step-desc">Certas, erradas e pontuação</div>
+          </div>
+        </div>
+        <div class="step-item" onclick="goStepR(4)">
+          <div class="step-dot">4</div>
+          <div class="step-info">
+            <div class="step-name">Confirmar</div>
+            <div class="step-desc">Adicionar às métricas</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PREVIEW -->
+      <div class="preview-box">
+        <div class="preview-label">Preview do card</div>
+        <div class="preview-inst">
+          <div class="preview-logo" id="cardPreviewLogo">🏛️</div>
+          <div>
+            <div class="preview-nome" id="cardPreviewNome">Nome do concurso</div>
+            <div class="preview-banca" id="cardPreviewBanca">Banca não definida</div>
+          </div>
+        </div>
+        <div class="preview-timer">
+          <div class="preview-timer-num" id="cardPreviewTimerNum">—</div>
+          <div class="preview-timer-label" id="cardPreviewTimerLabel">data a definir</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- RIGHT CONTENT -->
+    <main class="right-content">
+
+      <!-- STEP 0 — Escolha do tipo -->
+      <div class="step-panel active" id="step-0">
+        <div class="step-header">
+          <div class="step-badge">✦ Novo registro</div>
+          <div class="step-title">Que tipo de concurso?</div>
+          <div class="step-subtitle">Adicione um concurso que você está estudando agora, ou registre um concurso que já
+            foi realizado para guardar em suas métricas.</div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:8px">
+          <div class="date-option" onclick="escolherTipo('ativo')" style="padding:28px 24px">
+            <div class="date-option-icon" style="font-size:36px;margin-bottom:14px">🎯</div>
+            <div class="date-option-title" style="font-size:17px;margin-bottom:8px">Novo Foco de Concurso</div>
+            <div class="date-option-desc" style="font-size:12px;line-height:1.6">Adicione aqui um concurso que você
+              deseja focar, seja pré-edital ou pós edital.</div>
+          </div>
+          <div class="date-option" onclick="escolherTipo('realizado')" style="padding:28px 24px">
+            <div class="date-option-icon" style="font-size:36px;margin-bottom:14px">✅</div>
+            <div class="date-option-title" style="font-size:17px;margin-bottom:8px">Concurso já feito</div>
+            <div class="date-option-desc" style="font-size:12px;line-height:1.6">Cadastre aqui um concurso que você já
+              fez. Registre seu resultado, gabarito e colocação para guardar no seu mural de concurseiro.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 1 — Informações Gerais -->
+      <div class="step-panel" id="step-1">
+        <div class="step-header">
+          <div class="step-badge"><span class="wizard-step-icon" data-step-icon="1" aria-hidden="true"></span> Etapa 1 de 4</div>
+          <div class="step-title">Informações gerais</div>
+          <div class="step-subtitle">Dê um nome ao concurso, adicione os logos e identifique a banca organizadora.</div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Concurso</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Nome da Instituição ou Concurso <span>*</span></label>
+              <input class="form-input" id="a_nome" type="text" placeholder="Ex: Banco do Brasil ou CPNU 3">
+            </div>
+          </div>
+          <div class="form-row cols-2">
+            <div class="form-group">
+              <label class="form-label">Cargo / Área</label>
+              <input class="form-input" id="a_cargo" type="text" placeholder="Ex: Escriturário Agente Comercial">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Número de vagas</label>
+              <input class="form-input" id="a_vagas" type="text" placeholder="Ex: 20 vagas imediatas + 50 CR">
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Logo da Instituição</div>
+          <!-- Upload area (mostrada quando sem logo) -->
+          <div class="upload-area" id="uploadAreaInst" onclick="document.getElementById('fileInst').click()">
+            <div class="upload-icon">🖼️</div>
+            <div class="upload-text">Clique para carregar</div>
+            <div class="upload-size">PNG ou JPG · até 2MB</div>
+          </div>
+          <!-- Preview (mostrado quando tem logo) -->
+          <div class="upload-preview" id="previewInst" style="display:none">
+            <div class="upload-preview-img" id="previewInstImg" style="overflow:hidden;padding:0">
+              <img id="previewInstImgEl" style="width:100%;height:100%;object-fit:cover" src="">
+            </div>
+            <div class="upload-preview-info">
+              <div class="upload-preview-name" id="previewInstName">—</div>
+              <div class="upload-preview-size" id="previewInstSize">—</div>
+            </div>
+            <button class="upload-remove" onclick="removerLogo('inst')">✕ Remover</button>
+          </div>
+          <input type="file" id="fileInst" accept="image/*" style="display:none" onchange="carregarLogo('inst', this)">
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Banca organizadora</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Nome da banca <span>*</span></label>
+              <input class="form-input" id="inputBanca" type="text" placeholder="Ex: CESGRANRIO, CEBRASPE, FGV...">
+            </div>
+          </div>
+        </div>
+
+        <div class="bottom-nav">
+          <div class="step-counter">1 / 4</div>
+          <button class="btn-next" onclick="goStep(2)">Próximo — Data da prova →</button>
+        </div>
+      </div>
+
+      <!-- STEP 2 — Data da Prova -->
+      <div class="step-panel" id="step-2">
+        <div class="step-header">
+          <div class="step-badge"><span class="wizard-step-icon" data-step-icon="2" aria-hidden="true"></span> Etapa 2 de 4</div>
+          <div class="step-title">Data da prova</div>
+          <div class="step-subtitle">O edital já foi publicado com data definida, ou você está estudando em modo
+            pré-edital?</div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Modo do concurso</div>
+          <div class="date-options">
+            <div class="date-option" onclick="selectMode(this, 'pre')">
+              <div class="date-option-icon"><img src="assets/mascots/pre-edital-rocket-still.png" alt="Foguete do pré-edital" style="width:26px;height:26px;object-fit:contain"></div>
+              <div class="date-option-title">Pré-Edital</div>
+              <div class="date-option-desc">Ainda não há data definida. O programa exibirá quantas vezes você zerou o
+                edital.</div>
+            </div>
+            <div class="date-option selected" onclick="selectMode(this, 'data')">
+              <div class="date-option-icon">📅</div>
+              <div class="date-option-title">Data definida</div>
+              <div class="date-option-desc">O edital foi publicado. O programa exibirá um timer regressivo em dias.
+              </div>
+            </div>
+          </div>
+
+          <div class="date-input-wrap visible" id="date-input-wrap">
+            <div class="form-row cols-2" style="margin-top:0">
+              <div class="form-group">
+                <label class="form-label">Data da prova <span>*</span></label>
+                <input class="form-input" id="a_data" type="date" value="2026-10-15">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Local da prova</label>
+                <input class="form-input" id="a_local_prova" type="text" placeholder="Ex: Teresina — PI">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Opções adicionais</div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-title">Destaque de proximidade</div>
+              <div class="toggle-desc">Faltando 30 dias o card ganha um destaque sutil no topo. Faltando 7 dias fica
+                vermelho discreto — só pra você não esquecer, sem te deixar ansioso.</div>
+            </div>
+            <label class="toggle-switch"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+          </div>
+        </div>
+
+        <div class="bottom-nav">
+          <button class="btn-back" onclick="goStep(1)">← Voltar</button>
+          <div class="step-counter">2 / 4</div>
+          <button class="btn-next" onclick="goStep(3)">Próximo — Importar edital →</button>
+        </div>
+      </div>
+
+      <!-- STEP 3 — Importar Edital -->
+      <div class="step-panel" id="step-3">
+        <div class="step-header">
+          <div class="step-badge"><span class="wizard-step-icon" data-step-icon="3" aria-hidden="true"></span> Etapa 3 de 4</div>
+          <div class="step-title">Importar edital</div>
+          <div class="step-subtitle">Cole o JSON gerado ou adicione as matérias manualmente.
+            Atenção: Este processo automatizado pode apresentar inconsistências. Verifique se todos os tópicos e
+            subtópicos foram incluídos corretamente. Ocasionalmente, a IA pode gerar redundâncias ou tópicos
+            desnecessários. Você poderá realizar ajustes, inclusões ou exclusões após a importação.
+
+          </div>
+        </div>
+
+        <div class="prompt-box">
+          <div class="prompt-box-title">🤖 Prompt para gerar o JSON (testado no Gemini)</div>
+          <div class="prompt-text" id="promptTexto">Converta o edital abaixo para JSON valido neste formato:
+
+{
+  "materias": [
+    {
+      "id": "mat_001",
+      "nome": "Nome da Materia",
+      "topicos": [
+        {
+          "id": "top_001",
+          "nome": "Nome do Topico",
+          "subtopicos": []
+        }
+      ]
+    }
+  ]
+}
+
+Regras:
+- Retorne apenas JSON, sem Markdown ou explicacoes.
+- Preserve 100% do conteudo do edital. Nao resuma, nao omita, nao agrupe itens para encurtar.
+- Preserve a ordem e a hierarquia materia -> topico -> subtopico.
+- Remova numeracao e rotulos como "TOPICO 01 -"; o nome deve ficar limpo.
+- Use IDs sequenciais: mat_001, top_001, sub_001.
+- Nao adicione campos extras.
+- Use "subtopicos": [] quando o topico for uma unidade unica.
+- Nunca crie subtopico unico repetindo o nome do topico.
+- Nao divida automaticamente por virgula ou "e". So crie subtopicos quando forem assuntos claramente independentes para estudar separadamente.
+- Divida por ponto e virgula quando houver lista de normas, leis, decretos, resolucoes, portarias, artigos ou atos numerados.
+- Em listas de normas, mantenha o contexto no topico e crie um subtopico para cada item da lista, sem deixar nenhum item de fora.
+- Em listas de normas, prefixe cada item com o tipo do ato quando o contexto estiver no topico. Exemplo: "Resolucoes do CONTRAN: 04/1998; 14/1998" -> "Resolucao CONTRAN 04/1998", "Resolucao CONTRAN 14/1998".
+- Preserve observacoes de cada item, como "exceto os anexos", "exceto as fichas" ou "Anexo I", no subtopico correspondente.
+- Nao separe expressoes integradas como "Compreensao e interpretacao de textos", "Reescrita de frases e paragrafos", "Microfilmagem e preservacao", "Gestao e avaliacao do desempenho".
+- Pode separar quando forem blocos autonomos, como "Hardware e Software", "Word, Excel e Power Point", "Governanca, Governabilidade e Accountability".
+- Ao separar pares com termo compartilhado, complete o nome: "Regencia Nominal e Verbal" -> "Regencia Nominal", "Regencia Verbal".
+
+[Cole o edital abaixo]</div>
+          <div id="promptTextoBackupAntigo" style="display:none">Prompt antigo de verticalizacao:
+
+            {
+            "materias": [
+            {
+            "id": "mat_001",
+            "nome": "Nome da Matéria",
+            "topicos": [
+            {
+            "id": "top_001",
+            "nome": "Nome do Tópico",
+            "subtopicos": [
+            { "id": "sub_001", "nome": "Nome do Subtópico" }
+            ]
+            }
+            ]
+            }
+            ]
+            }
+
+            Mantenha a hierarquia matéria → tópico → subtópico. Quando um tópico contiver assuntos distintos separados
+            por vírgula, "e" ou ";", separe-os em subtópicos individuais. Os IDs devem seguir o padrão mat_001, top_001,
+            sub_001 incrementando. Não adicione campos extras. Retorne apenas o JSON, sem explicações.
+
+            [Cole o edital abaixo desta linha]</div>
+          <button class="prompt-copy" onclick="copiarPrompt()">📋 Copiar prompt completo</button>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Importar via JSON</div>
+          <div class="json-area">
+            <div class="json-area-header">
+              <div class="json-area-title">
+                <span class="json-tag">JSON</span>
+                Cole o JSON do edital aqui
+              </div>
+              <div class="json-area-actions">
+                <button class="json-btn"
+                  onclick="document.querySelector('textarea.json-input').value='';materiasTemp=[];renderMateriasLista()">✕
+                  Limpar</button>
+                <button class="json-btn primary" onclick="document.getElementById('fileJsonImport').click()">📥 Importar
+                  arquivo</button>
+                <input type="file" id="fileJsonImport" accept=".json" style="display:none"
+                  onchange="importarArquivoJSON(this)">
+              </div>
+            </div>
+            <textarea class="json-input" placeholder='{
+  "concurso": { ... },
+  "materias": [
+    {
+      "id": "mat_001",
+      "nome": "Língua Portuguesa",
+      "topicos": [ ... ]
+    }
+  ]
+}'></textarea>
+          </div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title" style="display:flex;align-items:center;justify-content:space-between">
+            <span>Ou adicionar manualmente</span>
+            <span style="font-size:12px;color:var(--text3);text-transform:none;letter-spacing:0">As matérias do JSON
+              aparecerão aqui para revisão</span>
+          </div>
+          <div class="materias-list" id="materiasList"></div>
+          <button class="add-materia-btn" onclick="adicionarMateriaManual()">＋ Adicionar matéria</button>
+        </div>
+
+        <div class="bottom-nav">
+          <button class="btn-back" onclick="goStep(2)">← Voltar</button>
+          <div class="step-counter">3 / 4</div>
+          <button class="btn-next" onclick="goStep(4)">Próximo — Revisar →</button>
+        </div>
+      </div>
+
+      <!-- STEP 4 — Revisar -->
+      <div class="step-panel" id="step-4">
+        <div class="step-header">
+          <div class="step-badge"><span class="wizard-step-icon" data-step-icon="4" aria-hidden="true"></span> Etapa 4 de 4</div>
+          <div class="step-title">Revisar e salvar</div>
+          <div class="step-subtitle">Confira o resumo do seu concurso antes de criar o dashboard.</div>
+        </div>
+
+        <div class="form-section">
+          <div class="form-section-title">Resumo do concurso</div>
+
+          <div id="resumoAtivo"
+            style="background:var(--bg3);border:1px solid var(--border2);border-radius:12px;padding:20px;margin-bottom:16px">
+            Carregando...</div>
+
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-title">Contar nas estatísticas gerais</div>
+              <div class="toggle-desc">Este concurso somará nas suas métricas globais de horas, questões e acertos.
+              </div>
+            </div>
+            <label class="toggle-switch"><input type="checkbox" checked><span class="toggle-slider"></span></label>
+          </div>
+        </div>
+
+        <div class="bottom-nav">
+          <button class="btn-back" onclick="goStep(3)">← Voltar</button>
+          <div class="step-counter">4 / 4</div>
+          <button class="btn-next btn-save">✓ Criar concurso e ir ao dashboard</button>
+        </div>
+      </div>
+
+      <!-- ═══ WIZARD REALIZADO ═══ -->
+
+      <!-- R1 — Informações básicas -->
+      <div class="step-panel" id="stepr-1">
+        <div class="step-header">
+          <div class="step-badge step-badge-realizado"><span class="wizard-step-icon" data-step-icon="1" aria-hidden="true"></span> Etapa 1 de 4</div>
+          <div class="step-title">Informações básicas</div>
+          <div class="step-subtitle">Dados gerais do concurso realizado.</div>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title">Concurso</div>
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Nome da Instituição ou Concurso <span>*</span></label>
+              <input class="form-input" id="r_nome" type="text" placeholder="Ex: Banco do Brasil ou CPNU 3">
+            </div>
+          </div>
+          <div class="form-row cols-2">
+            <div class="form-group">
+              <label class="form-label">Cargo / Área</label>
+              <input class="form-input" id="r_cargo" type="text" placeholder="Ex: Escriturário">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Banca</label>
+              <input class="form-input" id="r_banca" type="text" placeholder="Ex: CESGRANRIO">
+            </div>
+          </div>
+          <div class="form-row cols-2">
+            <div class="form-group">
+              <label class="form-label">Data em que foi realizado <span>*</span></label>
+              <input class="form-input" id="r_data" type="date">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Logo do concurso</label>
+              <div class="upload-area" id="uploadAreaR" onclick="document.getElementById('fileR').click()"
+                style="padding:14px">
+                <div class="upload-icon">🖼️</div>
+                <div class="upload-text">Clique para carregar</div>
+                <div class="upload-size">PNG ou JPG · até 2MB</div>
+              </div>
+              <div class="upload-preview" id="previewR" style="display:none">
+                <div class="upload-preview-img" style="overflow:hidden;padding:0">
+                  <img id="previewRImgEl" style="width:100%;height:100%;object-fit:cover" src="">
+                </div>
+                <div class="upload-preview-info">
+                  <div class="upload-preview-name" id="previewRName">—</div>
+                </div>
+                <button class="upload-remove" onclick="removerLogo('r')">✕ Remover</button>
+              </div>
+              <input type="file" id="fileR" accept="image/*" style="display:none" onchange="carregarLogo('r', this)">
+            </div>
+          </div>
+        </div>
+        <div class="bottom-nav">
+          <button class="btn-back" onclick="voltarTipo()">← Tipo</button>
+          <div class="step-counter">1 / 4</div>
+          <button class="btn-next" onclick="goStepR(2)">Próximo — Resultado →</button>
+        </div>
+      </div>
+
+      <!-- R2 — Resultado -->
+      <div class="step-panel" id="stepr-2">
+        <div class="step-header">
+          <div class="step-badge step-badge-realizado"><span class="wizard-step-icon" data-step-icon="2" aria-hidden="true"></span> Etapa 2 de 4</div>
+          <div class="step-title">Resultado</div>
+          <div class="step-subtitle">Como foi o resultado deste concurso?</div>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title">Status</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+            <div class="date-option result-option" id="res_aprovado" onclick="selecionarResultado('aprovado')"
+              style="text-align:center;padding:20px 12px;color:var(--green)">
+              <span class="wizard-result-icon" data-result-icon="trophy" aria-hidden="true"></span>
+              <div class="date-option-title" style="color:var(--green)">Aprovado</div>
+              <div class="date-option-desc" style="font-size:11px">Dentro das vagas</div>
+            </div>
+            <div class="date-option result-option" id="res_cr" onclick="selecionarResultado('cr')"
+              style="text-align:center;padding:20px 12px;color:var(--yellow)">
+              <span class="wizard-result-icon" data-result-icon="certificate" aria-hidden="true"></span>
+              <div class="date-option-title" style="color:#f5d060">Class. CR</div>
+              <div class="date-option-desc" style="font-size:11px">Cadastro de Reserva</div>
+            </div>
+            <div class="date-option result-option" id="res_aguardando" onclick="selecionarResultado('aguardando')"
+              style="text-align:center;padding:20px 12px;color:var(--text)">
+              <span class="wizard-result-icon" data-result-icon="hourglass" aria-hidden="true"></span>
+              <div class="date-option-title" style="color:var(--text)">Aguardando</div>
+              <div class="date-option-desc" style="font-size:11px">Aguardando Resultado</div>
+            </div>
+            <div class="date-option result-option" id="res_reprovado" onclick="selecionarResultado('reprovado')"
+              style="text-align:center;padding:20px 12px;color:var(--red)">
+              <span class="wizard-result-icon" data-result-icon="close" aria-hidden="true"></span>
+              <div class="date-option-title" style="color:var(--red)">Reprovado</div>
+              <div class="date-option-desc" style="font-size:11px">Não passou desta vez</div>
+            </div>
+          </div>
+          <div class="form-row cols-2">
+            <div class="form-group">
+              <label class="form-label">Colocação (posição no ranking)</label>
+              <input class="form-input" id="r_colocacao" type="number" min="1" placeholder="Ex: 247">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Total de candidatos</label>
+              <input class="form-input" id="r_total_candidatos" type="number" min="1" placeholder="Ex: 5000">
+            </div>
+          </div>
+          <div class="form-row cols-2">
+            <div class="form-group">
+              <label class="form-label">Número de vagas</label>
+              <input class="form-input" id="r_vagas" type="text" placeholder="Ex: 20 vagas imediatas + 50 CR">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Local da prova</label>
+              <input class="form-input" id="r_local_prova" type="text" placeholder="Ex: Maceió — AL">
+            </div>
+          </div>
+        </div>
+        <div class="bottom-nav">
+          <button class="btn-back" onclick="goStepR(1)">← Voltar</button>
+          <div class="step-counter">2 / 4</div>
+          <button class="btn-next" onclick="goStepR(3)">Próximo — Gabarito →</button>
+        </div>
+      </div>
+
+      <!-- R3 — Gabarito -->
+      <div class="step-panel" id="stepr-3">
+        <div class="step-header">
+          <div class="step-badge step-badge-realizado"><span class="wizard-step-icon" data-step-icon="3" aria-hidden="true"></span> Etapa 3 de 4</div>
+          <div class="step-title">Gabarito</div>
+          <div class="step-subtitle">Compare sua marcação com o gabarito oficial. Tudo é opcional — preencha o que
+            tiver.</div>
+        </div>
+        <div class="form-section">
+          <div class="form-section-title">Questões — sua marcação vs gabarito oficial</div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px">
+            <div class="pomo-cfg-item"
+              style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+              <div
+                style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--green);margin-bottom:8px">
+                ✅ Certas</div>
+              <input class="form-input" id="r_certas" type="number" min="0" placeholder="0"
+                style="text-align:center;font-size:20px;font-family:var(--mono);font-weight:700;color:var(--green)">
+            </div>
+            <div class="pomo-cfg-item"
+              style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+              <div
+                style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--red);margin-bottom:8px">
+                ❌ Erradas</div>
+              <input class="form-input" id="r_erradas" type="number" min="0" placeholder="0"
+                style="text-align:center;font-size:20px;font-family:var(--mono);font-weight:700;color:var(--red)">
+            </div>
+            <div class="pomo-cfg-item"
+              style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+              <div
+                style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--text3);margin-bottom:8px">
+                ⬜ Em branco</div>
+              <input class="form-input" id="r_branco" type="number" min="0" placeholder="0"
+                style="text-align:center;font-size:20px;font-family:var(--mono);font-weight:700">
+            </div>
+            <div class="pomo-cfg-item"
+              style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center">
+              <div
+                style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--yellow);margin-bottom:8px">
+                🏆 Pontuação</div>
+              <div style="display:flex;align-items:center;justify-content:center;gap:4px">
+                <input class="form-input" id="r_pontuacao" type="number" step="any" min="0" placeholder="0"
+                  style="width:55%;text-align:center;font-size:20px;font-family:var(--mono);font-weight:700;color:var(--yellow);padding:10px 4px">
+                <span style="font-size:14px;color:var(--text3)">/</span>
+                <input class="form-input" id="r_pontuacao_maxima" type="number" step="any" min="0" placeholder="Máx"
+                  style="width:45%;text-align:center;font-size:14px;font-family:var(--mono);font-weight:600;color:var(--text3);padding:10px 4px">
+              </div>
+            </div>
+          </div>
+
+          <div class="form-section-title">✍️ Redação / Discursiva</div>
+          <div style="width:200px;margin-bottom:20px">
+              <input class="form-input" id="r_redacao" type="number" step="0.01" min="0" placeholder="0.00"
+                style="text-align:center;font-size:24px;font-family:var(--mono);font-weight:700;color:var(--accent2);height:60px;border-color:var(--border2);background:rgba(124,92,252,0.03)">
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label class="form-label">Observações (opcional)</label>
+              <input class="form-input" id="r_obs" type="text"
+                placeholder="Ex: Anularam 2 questões, nota de corte foi 65 pts...">
+            </div>
+          </div>
+        </div>
+        <div class="bottom-nav">
+          <button class="btn-back" onclick="goStepR(2)">← Voltar</button>
+          <div class="step-counter">3 / 4</div>
+          <button class="btn-next" onclick="goStepR(4)">Próximo — Confirmar →</button>
+        </div>
+      </div>
+
+      <!-- R4 — Confirmar -->
+      <div class="step-panel" id="stepr-4">
+        <div class="step-header">
+          <div class="step-badge step-badge-realizado"><span class="wizard-step-icon" data-step-icon="4" aria-hidden="true"></span> Etapa 4 de 4</div>
+          <div class="step-title">Confirmar registro</div>
+          <div class="step-subtitle">Revise os dados antes de salvar no seu mural de batalhas.</div>
+        </div>
+        <div class="form-section">
+          <div id="resumoRealizado"
+            style="background:var(--bg3);border:1px solid var(--border2);border-radius:12px;padding:20px;margin-bottom:16px">
+            <!-- preenchido pelo JS -->
+          </div>
+          <div class="toggle-row">
+            <div class="toggle-info">
+              <div class="toggle-title">Contar nas estatísticas gerais</div>
+              <div class="toggle-desc">Este concurso somará nas suas métricas globais.</div>
+            </div>
+            <label class="toggle-switch"><input type="checkbox" id="r_contar"><span
+                class="toggle-slider"></span></label>
+          </div>
+        </div>
+        <div class="bottom-nav">
+          <button class="btn-back" onclick="goStepR(3)">← Voltar</button>
+          <div class="step-counter">4 / 4</div>
+          <button class="btn-next"
+            style="background:linear-gradient(135deg,var(--yellow),var(--orange));box-shadow:0 4px 16px rgba(245,200,66,0.3)"
+            onclick="salvarRealizado()">✓ Salvar no mural</button>
+        </div>
+      </div>
+
+    </main>
+  </div>
+

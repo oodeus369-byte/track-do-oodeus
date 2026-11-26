@@ -1,0 +1,3293 @@
+/**
+ * Track do Oodeus — [R4-port] aba_materia.html — Script 2 (original 698–3794)
+ * Principal da aba de matéria. No plugin roda dentro do MESMO wrapper `new
+ * Function` do Script1 (env léxico compartilhado — lê/excreta cId, materia,
+ * _modalTid etc. via ponte de nomes; ver render-util.runPageScripts). Ordem
+ * igual ao original (body → data.js → nav.js → Script1 → Script2): data.js roda
+ * no onload do plugin (decisão R2), nav boot acontece ANTES da cadeia (aqui não
+ * é desvio — o original também carrega nav.js antes do Script1).
+ * Adaptações:
+ *   1. Cabeçalho + goPage local (delega a window.__CT_NAV_GO_PAGE; fallback
+ *      location.href original).
+ *   2. 3 pontos de navegação → goPage: guards do init (dashboard.html ×2) e
+ *      abrirRevisaoNaAba (revisoes.html?revisaoId=); 2 pontos de
+ *      location.reload → reloadPagina (re-render da view, mimético do reload
+ *      do original: salvarNovoNomeMateria e zerarEstatisticasMateria).
+ *   3. FLASH interno (abrirCaderno): window.location.href → goPage (navegação
+ *      de view; hash #flashcards:<id> preservado no dest — o dashboard é R9).
+ *   4. location.search do aplicarFocoRevisao → seam: window.__CT_PAGE_SEARCH__
+ *      (query da navegação, setada pelo shell a cada render; em browser puro,
+ *      cai no location.search real).
+ *   5. MATERIAL_LOGOS: 4 literais de asset → __ctAssetUrl('assets/…').
+ *   6. openFreeTimerPreset: timer-popup.js roda DEPOIS do Script2 (3º script
+ *      do wrapper, R5) — o guard typeof do original encontra a função no
+ *      primeiro try ou no retry único de 60ms (sem loop; sem desvio de ordem:
+ *      o <script src> 3800 também é depois do Script2 no original).
+ *   7. [ADIÇÃO OODEUS — documento-mestre §3.7] 5º tipo de material NOTA
+ *      "Anotações" 📝: metadados de tipo, emoji default na migração, busca
+ *      fuzzy de notas do vault (host.pickVaultNote) no modal de adicionar e
+ *      no de editar, e abertura interna via host.openVaultNote.
+ *   8. [R16] prompt() nativo → await CT.prompt(...) (adicionarTopico 2185,
+ *      renomear tópico/subtópico 2959/2970): o Electron não implementa
+ *      prompt() — lançava "prompt() is not supported." e a função morria
+ *      antes de CT.saveTopico (bug R16-2). Modal próprio assíncrono em
+ *      src/data.js.showPrompt, mesma semântica (string|null).
+ * Dead code (etapa-06 §13)
+ * preservado verbatim: camada "cole", ctxMenu, host de histórico no HTML etc.
+ */
+// ── ESTADO ────────────────────────────────
+const cId      = sessionStorage.getItem('ct_concurso_ativo');
+const mId      = sessionStorage.getItem('ct_materia_ativa');
+let   materia  = null;
+let   popupTopicoId = null;
+let   popupSubId    = null;
+let   manualRevTopicoId = null;
+let   manualRevSubId    = null;
+
+function goPage(dest) {
+  if (window.__CT_NAV_GO_PAGE) { window.__CT_NAV_GO_PAGE(dest); return; }
+  window.location.href = dest;
+}
+
+// [seam] location.reload → re-render da view corrente (goPage da própria
+// página — a R2 o define como re-render mimético do reload; em browser puro
+// cai no reload original). Usado por salvarNovoNomeMateria e
+// zerarEstatisticasMateria.
+function reloadPagina() {
+  if (window.__CT_NAV_GO_PAGE) { window.__CT_NAV_GO_PAGE('aba_materia.html'); return; }
+  window.location.reload();
+}
+
+// ── INIT ──────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  if (!cId || !mId) { goPage('dashboard.html'); return; }
+  materia = CT.getMateria(mId);
+  if (!materia) { goPage('dashboard.html'); return; }
+
+  // Sidebar
+  const c = CT.getConcurso(cId);
+  if (c) {
+    document.querySelector('.concurso-nome').textContent = c.nome;
+    document.querySelector('.concurso-banca').textContent = c.banca || '—';
+  }
+
+  const titleContainer = document.getElementById('topbarNome');
+  titleContainer.innerHTML = `📘 ${materia.nome} <button onclick="abrirOpcoesMateria()" style="margin-left:8px;padding:2px 8px;border:1px solid var(--border);border-radius:6px;background:transparent;cursor:pointer;font-size:16px;color:var(--text3);opacity:0.8;transition:all 0.15s" onmouseover="this.style.opacity=1;this.style.borderColor='var(--text3)';this.style.color='var(--text)'" onmouseout="this.style.opacity=0.8;this.style.borderColor='var(--border)';this.style.color='var(--text3)'" title="Configurações da Matéria">⋮</button>`;
+  
+  // Check for subject-level matches
+  if (!materia.cadernos || materia.cadernos.length === 0) {
+    const m = CT.findMatches(materia.nome, cId, 'materia');
+    if (m.length > 0) {
+      const link = document.createElement('span');
+      link.className = 'link-glow';
+      link.innerHTML = '🔗';
+      link.title = 'Encontramos materiais desta matéria em outros concursos!';
+      link.style.marginLeft = '12px';
+      link.onclick = (e) => { e.stopPropagation(); abrirModalLink(mId, materia.nome, 'materia'); };
+      titleContainer.appendChild(link);
+    }
+  }
+
+  CT_MigratePDFEmojis();
+  renderCadernos();
+  renderTopicos();
+  updateProgresso();
+  aplicarFocoRevisao();
+  ensureAjusteHistoryHost();
+
+  // Handle auto-expansion of topic/subtopic when navigated from Dashboard
+  setTimeout(() => {
+    const expandTopicoId = sessionStorage.getItem('ct_expand_topico');
+    const expandSubtopicoId = sessionStorage.getItem('ct_expand_subtopico');
+    
+    if (expandTopicoId) {
+      sessionStorage.removeItem('ct_expand_topico');
+      toggleTopico('tc_' + expandTopicoId);
+      
+      if (expandSubtopicoId) {
+        sessionStorage.removeItem('ct_expand_subtopico');
+        setTimeout(() => {
+          toggleSub('sc_' + expandSubtopicoId);
+          const subEl = document.getElementById('sc_' + expandSubtopicoId);
+          if (subEl) {
+            subEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }
+        }, 150);
+      } else {
+        const topEl = document.getElementById('tc_' + expandTopicoId);
+        if (topEl) {
+          topEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    }
+  }, 250);
+});
+
+// <CT_DEV_TOOLS_ABA_MATERIA_FUNCTIONS>
+function abrirModalMensagemLinksIA({ titulo, subtitulo = '', corpo = '', acaoLabel = 'Entendi', onAction = null }) {
+  const old = document.getElementById('modalMensagemLinksIA');
+  if (old) old.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modalMensagemLinksIA';
+  overlay.className = 'popup-overlay visible';
+  overlay.innerHTML = `
+    <div class="popup links-import-popup" onclick="event.stopPropagation()">
+      <div class="links-premium-icon">IA</div>
+      <div class="links-import-title">${escapeHtml(titulo)}</div>
+      ${subtitulo ? `<div class="links-import-sub">${escapeHtml(subtitulo)}</div>` : ''}
+      ${corpo || ''}
+      <div class="links-import-actions">
+        <button type="button" class="links-import-primary" id="modalMensagemLinksIAOk">${escapeHtml(acaoLabel)}</button>
+      </div>
+    </div>
+  `;
+
+  const fechar = () => {
+    overlay.remove();
+    if (typeof onAction === 'function') onAction();
+  };
+  overlay.addEventListener('click', event => {
+    if (event.target === overlay) fechar();
+  });
+  document.body.appendChild(overlay);
+  overlay.querySelector('#modalMensagemLinksIAOk')?.addEventListener('click', fechar);
+}
+
+async function copiarPromptLinksIA() {
+  const prompt = CT.gerarPromptLinksMateriaIA(mId);
+  try {
+    await navigator.clipboard.writeText(prompt);
+    CT.toast('Prompt Google Drive copiado.', 'IA');
+  } catch (e) {
+    const area = document.createElement('textarea');
+    area.value = prompt;
+    area.setAttribute('readonly', 'readonly');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    document.execCommand('copy');
+    document.body.removeChild(area);
+    CT.toast('Prompt Google Drive copiado.', 'IA');
+  }
+  abrirModalMensagemLinksIA({
+    titulo: 'Estrutura da matéria copiada',
+    corpo: `
+      <div class="links-import-tip">Use no Google Antigravity para linkar automaticamente os PDFs da sua pasta com os tópicos da matéria.</div>
+      <div class="links-premium-list">
+        <div><span class="links-premium-dot"></span><span>O Antigravity deve retornar a estrutura JSON final com tópicos linkados.</span></div>
+        <div><span class="links-premium-dot"></span><span>Copie o código e clique em Importar Links, cole o código ou importe o arquivo .json.</span></div>
+      </div>
+    `
+  });
+}
+
+function abrirResumoImportacaoLinksIA(res) {
+  abrirModalMensagemLinksIA({
+    titulo: 'Importação de links concluída',
+    subtitulo: 'O JSON foi processado e os materiais válidos foram adicionados.',
+    corpo: `
+      <div class="links-premium-grid">
+        <div class="links-premium-stat"><strong>${res.adicionados || 0}</strong><span>Adicionados</span></div>
+        <div class="links-premium-stat"><strong>${res.repetidosIgnorados || 0}</strong><span>Repetidos ignorados</span></div>
+        <div class="links-premium-stat"><strong>${res.ignoradosPorRegra || 0}</strong><span>Ignorados por regra</span></div>
+        <div class="links-premium-stat"><strong>${res.destinosNaoEncontrados || 0}</strong><span>Destinos não encontrados</span></div>
+      </div>
+      <div class="links-import-tip">Links inválidos: <strong>${res.linksInvalidos || 0}</strong></div>
+    `
+  });
+}
+
+function aplicarImportacaoLinksIA(conteudo) {
+  const res = CT.importarLinksMateriaIA(conteudo, mId);
+  if (!res || !res.ok) {
+    abrirModalMensagemLinksIA({
+      titulo: 'Não foi possível importar',
+      subtitulo: 'Revise se o conteúdo colado é o JSON final retornado pela IA.',
+      corpo: `<div class="links-import-tip">${escapeHtml((res && res.erro) || 'Erro desconhecido')}</div>`
+    });
+    return false;
+  }
+  materia = CT.getMateria(mId);
+  renderCadernos();
+  renderTopicos();
+  updateProgresso();
+  abrirResumoImportacaoLinksIA(res);
+  return true;
+}
+
+async function importarLinksIA() {
+  abrirModalImportarLinksIA();
+}
+
+function abrirModalImportarLinksIA() {
+  const old = document.getElementById('modalImportarLinksIA');
+  if (old) old.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modalImportarLinksIA';
+  overlay.className = 'popup-overlay visible';
+  overlay.innerHTML = `
+    <div class="popup links-import-popup" onclick="event.stopPropagation()">
+      <div class="links-import-title">Importar Links</div>
+      <div class="links-import-sub">Cole o JSON retornado pelo Gemini ou selecione um arquivo .json exportado pela IA.</div>
+      <div class="links-import-tip">
+        Colar o JSON é seguro para retornos normais do Gemini. Se o texto vier muito grande ou travar o campo, prefira importar o arquivo .json.
+      </div>
+      <textarea id="linksIaJsonColado" class="links-import-textarea" spellcheck="false" placeholder="Cole aqui o JSON final retornado pela IA..."></textarea>
+      <div class="links-import-actions">
+        <button type="button" class="links-import-secondary" onclick="fecharModalImportarLinksIA()">Cancelar</button>
+        <button type="button" class="links-import-secondary" onclick="importarLinksIAArquivoDireto()">Importar arquivo .json</button>
+        <button type="button" class="links-import-primary" onclick="importarLinksIAColado()">Importar JSON colado</button>
+      </div>
+    </div>
+  `;
+  overlay.addEventListener('click', event => {
+    if (event.target === overlay) fecharModalImportarLinksIA();
+  });
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('linksIaJsonColado')?.focus(), 50);
+}
+
+function fecharModalImportarLinksIA() {
+  document.getElementById('modalImportarLinksIA')?.remove();
+}
+
+function importarLinksIAColado() {
+  const textarea = document.getElementById('linksIaJsonColado');
+  const conteudo = textarea ? textarea.value.trim() : '';
+  if (!conteudo) {
+    abrirModalMensagemLinksIA({
+      titulo: 'JSON vazio',
+      subtitulo: 'Cole o JSON retornado pela IA antes de importar.'
+    });
+    return;
+  }
+  if (aplicarImportacaoLinksIA(conteudo)) fecharModalImportarLinksIA();
+}
+
+async function importarLinksIAArquivoDireto() {
+  if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.selecionar_arquivo_json === 'function') {
+    const res = await window.pywebview.api.selecionar_arquivo_json();
+    if (res && res.ok) {
+      if (aplicarImportacaoLinksIA(res.conteudo)) fecharModalImportarLinksIA();
+      return;
+    }
+    if (res && res.motivo !== 'cancelado') {
+      abrirModalMensagemLinksIA({
+        titulo: 'Não foi possível abrir o arquivo',
+        subtitulo: 'O arquivo .json não pôde ser lido.',
+        corpo: `<div class="links-import-tip">${escapeHtml(res.motivo)}</div>`
+      });
+    }
+    return;
+  }
+  document.getElementById('fileImportLinksIa').click();
+}
+
+function importarArquivoLinksIA(input) {
+  const file = input && input.files && input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = event => {
+    if (aplicarImportacaoLinksIA(event.target.result)) fecharModalImportarLinksIA();
+    input.value = '';
+  };
+  reader.onerror = () => {
+    input.value = '';
+    abrirModalMensagemLinksIA({
+      titulo: 'Não foi possível ler o arquivo',
+      subtitulo: 'Selecione outro arquivo .json e tente novamente.'
+    });
+  };
+  reader.readAsText(file, 'utf-8');
+}
+
+// ── PROGRESSO ─────────────────────────────
+function resumoLimpezaLinksMateria(res) {
+  const filtro = Array.isArray(res.tiposRemovidos) && res.tiposRemovidos.length
+    ? `Filtro aplicado: ${res.tiposRemovidos.map(materialTypeLabel).join(', ')}`
+    : 'Filtro aplicado: todos os tipos';
+  return [
+    'Limpeza de links concluída.',
+    filtro,
+    `Links removidos: ${res.linksRemovidos || 0}`,
+    `Matéria afetada: ${res.materiaAtualizada ? 'sim' : 'não'}`,
+    `Tópicos afetados: ${res.topicosAtualizados || 0}`,
+    `Subtópicos afetados: ${res.subtopicosAtualizados || 0}`
+  ].join('\n');
+}
+
+function escolherEscopoLimpezaLinksMateria() {
+  const opcoes = [
+    {
+      chave: 'todos',
+      titulo: 'Todos os links',
+      detalhe: 'Remove materiais da matéria, tópicos e subtópicos.',
+      tipos: [],
+      confirmLabel: 'Zerar tudo'
+    },
+    {
+      chave: 'quest',
+      titulo: 'Cadernos de questões',
+      detalhe: 'Remove apenas cadernos de questões.',
+      tipos: ['QUEST'],
+      confirmLabel: 'Zerar cadernos'
+    },
+    {
+      chave: 'pdf',
+      titulo: 'PDFs',
+      detalhe: 'Remove apenas links marcados como PDF.',
+      tipos: ['PDF'],
+      confirmLabel: 'Zerar PDFs'
+    },
+    {
+      chave: 'video',
+      titulo: 'Videoaulas',
+      detalhe: 'Remove apenas videoaulas.',
+      tipos: ['VIDEO'],
+      confirmLabel: 'Zerar videoaulas'
+    },
+    {
+      chave: 'flash',
+      titulo: 'Flashcards',
+      detalhe: 'Remove apenas links marcados como FLASH.',
+      tipos: ['FLASH'],
+      confirmLabel: 'Zerar flashcards'
+    }
+  ];
+
+  return new Promise(resolve => {
+    const old = document.getElementById('modalZerarLinksMateria');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'modalZerarLinksMateria';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.73);backdrop-filter:blur(3px);z-index:10000;display:flex;align-items:center;justify-content:center;padding:18px;box-sizing:border-box';
+
+    overlay.innerHTML = `
+      <div role="dialog" aria-modal="true" aria-labelledby="modalZerarLinksTitulo"
+        style="background:var(--bg2);border:1px solid var(--border2);border-radius:14px;
+        padding:24px;width:520px;max-width:100%;box-shadow:0 24px 60px rgba(0,0,0,0.6)">
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px">
+          <div>
+            <div id="modalZerarLinksTitulo" style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:4px">Zerar links da matéria</div>
+            <div style="font-size:12px;color:var(--text3);line-height:1.45">Escolha qual tipo de material deseja limpar somente nesta matéria.</div>
+          </div>
+          <button type="button" id="modalZerarLinksFechar" aria-label="Cancelar"
+            style="width:30px;height:30px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text3);font-size:18px;cursor:pointer">x</button>
+        </div>
+        <div id="modalZerarLinksOpcoes" style="display:grid;gap:9px"></div>
+        <button type="button" id="modalZerarLinksCancelar"
+          style="margin-top:16px;width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;
+          background:transparent;color:var(--text3);font-family:var(--sans);font-size:13px;cursor:pointer">Cancelar</button>
+      </div>
+    `;
+
+    const finish = escolha => {
+      document.removeEventListener('keydown', onKeyDown, true);
+      overlay.remove();
+      resolve(escolha);
+    };
+    const onKeyDown = event => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        finish(null);
+      }
+    };
+
+    const lista = overlay.querySelector('#modalZerarLinksOpcoes');
+    opcoes.forEach(opcao => {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:14px;text-align:left;width:100%;padding:12px 14px;background:var(--bg3);border:1px solid var(--border);border-radius:9px;color:var(--text);font-family:var(--sans);cursor:pointer';
+      btn.innerHTML = `
+        <span style="display:flex;flex-direction:column;gap:3px;min-width:0">
+          <strong style="font-size:13px">${opcao.titulo}</strong>
+          <small style="font-size:11px;line-height:1.35;color:var(--text3)">${opcao.detalhe}</small>
+        </span>
+        <span style="font-size:11px;font-weight:800;color:${opcao.chave === 'todos' ? '#ffb3b3' : 'var(--accent)'}">${opcao.chave === 'todos' ? 'TUDO' : opcao.tipos.join(', ')}</span>
+      `;
+      btn.addEventListener('mouseenter', () => {
+        btn.style.borderColor = opcao.chave === 'todos' ? 'rgba(245,90,90,0.65)' : 'var(--accent)';
+      });
+      btn.addEventListener('mouseleave', () => {
+        btn.style.borderColor = 'var(--border)';
+      });
+      btn.addEventListener('click', () => finish(opcao));
+      lista.appendChild(btn);
+    });
+
+    overlay.querySelector('#modalZerarLinksCancelar').addEventListener('click', () => finish(null));
+    overlay.querySelector('#modalZerarLinksFechar').addEventListener('click', () => finish(null));
+    overlay.addEventListener('click', event => {
+      if (event.target === overlay) finish(null);
+    });
+    document.addEventListener('keydown', onKeyDown, true);
+    document.body.appendChild(overlay);
+    lista.querySelector('button')?.focus();
+  });
+}
+
+async function zerarLinksMateriaDev() {
+  const escopo = await escolherEscopoLimpezaLinksMateria();
+  if (!escopo) return;
+
+  const ok = await CT.confirm(
+    `Tem certeza que deseja apagar ${escopo.titulo.toUpperCase()} desta matéria?\n\n` +
+    'Isso vai limpar os materiais correspondentes da matéria, dos tópicos e dos subtópicos desta matéria.',
+    { title: 'Zerar links da matéria', confirmLabel: escopo.confirmLabel }
+  );
+  if (!ok) return;
+
+  const res = CT.limparLinksMateriaCompleta(mId, { tipos: escopo.tipos });
+  if (!res || !res.ok) {
+    alert('Não foi possível zerar os links: ' + ((res && res.erro) || 'erro desconhecido'));
+    return;
+  }
+
+  materia = CT.getMateria(mId);
+  renderCadernos();
+  renderTopicos();
+  updateProgresso();
+  alert(resumoLimpezaLinksMateria(res));
+}
+// </CT_DEV_TOOLS_ABA_MATERIA_FUNCTIONS>
+
+function updateProgresso() {
+  const topicos   = CT.getTopicos(mId);
+  const estudados = topicos.filter(t => t.estudado).length;
+  const total     = topicos.length;
+  const pct       = total > 0 ? Math.round(estudados/total*100) : 0;
+
+  document.getElementById('progPct').textContent   = pct + '%';
+  document.getElementById('progEst').textContent   = estudados;
+  document.getElementById('progTotal').textContent = total;
+  document.getElementById('progFill').style.width  = pct + '%';
+
+  const sessoes  = CT.getSessoes({ concursoId: cId, materiaId: mId });
+  const seg      = CT.totalSegundos(sessoes);
+  const questoes = CT.getQuestoes({ materiaId: mId });
+  const stats    = CT.calcStats(questoes);
+
+  document.getElementById('statHoras').textContent   = seg > 0 ? CT.formatarTempo(seg) : '—';
+  document.getElementById('statQ').textContent        = stats.resolvidas > 0 ? stats.resolvidas : '—';
+  const aEl = document.getElementById('statAcertos');
+  if (stats.pct != null) {
+    aEl.textContent = stats.pct + '%';
+    aEl.style.color = pctColor(stats.pct);
+  } else {
+    aEl.textContent = '—';
+    aEl.style.color = 'var(--text3)';
+  }
+}
+
+// ── CORES ─────────────────────────────────
+function pctColor(p) {
+  return CT.pctColor ? CT.pctColor(p) : 'var(--text3)';
+}
+function pctClass(p) {
+  return CT.pctClass ? CT.pctClass(p) : 'none';
+}
+
+const MATERIAL_LOGOS = {
+  estrategia: __ctAssetUrl('assets/material-logos/estrategia.png'),
+  qconcursos: __ctAssetUrl('assets/material-logos/qconcursos.png'),
+  youtube: __ctAssetUrl('assets/material-logos/youtube.png'),
+  drive: __ctAssetUrl('assets/material-logos/google-drive.png')
+};
+
+const MATERIAL_TYPE_LABELS = {
+  QUEST: 'Caderno de Questões',
+  PDF: 'PDF',
+  VIDEO: 'Videoaula',
+  FLASH: 'Flashcards',
+  NOTA: 'Anotações' // [ADIÇÃO OODEUS]
+};
+
+const MATERIAL_TYPE_DEFAULT_NAMES = {
+  QUEST: 'Caderno de Questões',
+  PDF: 'PDF de Aulas',
+  VIDEO: 'Videoaula',
+  FLASH: 'Flashcards',
+  NOTA: 'Anotações' // [ADIÇÃO OODEUS]
+};
+
+const MATERIAL_TYPE_EMOJIS = {
+  QUEST: '📓',
+  PDF: '📙',
+  VIDEO: '🎥',
+  FLASH: '🎴',
+  NOTA: '📝' // [ADIÇÃO OODEUS]
+};
+
+const MATERIAL_LEGACY_NAMES = {
+  'Caderno de Questoes': 'Caderno de Questões',
+  'Caderno de Questões': 'Caderno de Questões',
+  'Link de Videoaulas': 'Videoaula',
+  'Videoaulas': 'Videoaula'
+};
+
+function materialRotulo(cad) {
+  return String(cad && cad.rotulo || '').trim().toUpperCase();
+}
+
+function materialTypeLabel(rotulo) {
+  const key = String(rotulo || '').trim().toUpperCase();
+  return MATERIAL_TYPE_LABELS[key] || key || 'Material';
+}
+
+function materialDefaultName(rotulo) {
+  const key = String(rotulo || '').trim().toUpperCase();
+  return MATERIAL_TYPE_DEFAULT_NAMES[key] || materialTypeLabel(key);
+}
+
+function materialDisplayName(cad) {
+  const rotulo = materialRotulo(cad);
+  const raw = String(cad && cad.nome || '').trim();
+  if (!raw || raw === 'Material') return materialDefaultName(rotulo);
+  return MATERIAL_LEGACY_NAMES[raw] || raw;
+}
+
+function materialFallbackEmoji(rotulo) {
+  const key = String(rotulo || '').trim().toUpperCase();
+  return MATERIAL_TYPE_EMOJIS[key] || '📓';
+}
+
+function isQconcursosUrl(url) {
+  try {
+    const host = new URL(String(url || '')).hostname.toLowerCase();
+    return host === 'qconcursos.com' || host === 'www.qconcursos.com' || host.endsWith('.qconcursos.com');
+  } catch (e) {
+    return /(^|[./])qconcursos\.com/i.test(String(url || ''));
+  }
+}
+
+function isEstrategiaUrl(url) {
+  try {
+    const host = new URL(String(url || '')).hostname.toLowerCase();
+    return host === 'estrategiaconcursos.com.br' || host === 'www.estrategiaconcursos.com.br' || host.endsWith('.estrategiaconcursos.com.br');
+  } catch (e) {
+    return /(^|[./])estrategiaconcursos\.com\.br/i.test(String(url || ''));
+  }
+}
+
+function isYoutubeUrl(url) {
+  try {
+    const host = new URL(String(url || '')).hostname.toLowerCase();
+    return host === 'youtube.com' || host === 'www.youtube.com' || host.endsWith('.youtube.com') || host === 'youtu.be';
+  } catch (e) {
+    return /(^|[./])(youtube\.com|youtu\.be)/i.test(String(url || ''));
+  }
+}
+
+function isGoogleDriveUrl(url) {
+  try {
+    const host = new URL(String(url || '')).hostname.toLowerCase();
+    return host === 'drive.google.com' || host === 'docs.google.com';
+  } catch (e) {
+    return /(^|[./])(drive|docs)\.google\.com/i.test(String(url || ''));
+  }
+}
+
+function isPdfMaterial(cad) {
+  const rotulo = materialRotulo(cad);
+  const url = String(cad && cad.url || '');
+  return rotulo === 'PDF' || /\.pdf(?:$|[?#])/i.test(url);
+}
+
+function materialIconHtml(cad) {
+  const rotulo = materialRotulo(cad);
+  const url = String(cad && cad.url || '');
+  if (isEstrategiaUrl(cad && cad.url)) {
+    return `<img class="material-logo-img" src="${MATERIAL_LOGOS.estrategia}" alt="Estratégia Concursos" loading="lazy" draggable="false" ondragstart="event.preventDefault()" onerror="this.replaceWith(document.createTextNode('🦉'))">`;
+  }
+  if (rotulo === 'VIDEO') {
+    return `<img class="material-logo-img" src="${MATERIAL_LOGOS.youtube}" alt="YouTube" loading="lazy" draggable="false" ondragstart="event.preventDefault()" onerror="this.replaceWith(document.createTextNode('🎥'))">`;
+  }
+  if (rotulo === 'QUEST' && isQconcursosUrl(cad && cad.url)) {
+    return `<img class="material-logo-img" src="${MATERIAL_LOGOS.qconcursos}" alt="Qconcursos" loading="lazy" draggable="false" ondragstart="event.preventDefault()" onerror="this.replaceWith(document.createTextNode('📓'))">`;
+  }
+  if (isPdfMaterial(cad) && isGoogleDriveUrl(url)) {
+    return `<img class="material-logo-img" src="${MATERIAL_LOGOS.drive}" alt="Google Drive" loading="lazy" draggable="false" ondragstart="event.preventDefault()" onerror="this.replaceWith(document.createTextNode('☁'))">`;
+  }
+  return `<span>${escapeHtml((cad && cad.emoji) || materialFallbackEmoji(rotulo))}</span>`;
+}
+
+function materialAccessLogoHtml(key) {
+  if (key === 'qconcursos') {
+    return `<span class="materials-access-logo" title="Cadernos de questões do Qconcursos"><img src="${MATERIAL_LOGOS.qconcursos}" alt="Qconcursos" loading="lazy" draggable="false" ondragstart="event.preventDefault()" onerror="this.parentElement.replaceWith(document.createTextNode('📓'))"></span>`;
+  }
+  if (key === 'estrategia') {
+    return `<span class="materials-access-logo" title="Materiais do Estratégia Concursos"><img src="${MATERIAL_LOGOS.estrategia}" alt="Estratégia" loading="lazy" draggable="false" ondragstart="event.preventDefault()" onerror="this.parentElement.replaceWith(document.createTextNode('🦉'))"></span>`;
+  }
+  if (key === 'youtube') {
+    return `<span class="materials-access-logo" title="Videoaulas do YouTube"><img src="${MATERIAL_LOGOS.youtube}" alt="YouTube" loading="lazy" draggable="false" ondragstart="event.preventDefault()" onerror="this.parentElement.replaceWith(document.createTextNode('🎥'))"></span>`;
+  }
+  if (key === 'drive') {
+    return `<span class="materials-access-logo drive" title="Materiais do Google Drive"><img src="${MATERIAL_LOGOS.drive}" alt="Google Drive" loading="lazy" draggable="false" ondragstart="event.preventDefault()" onerror="this.parentElement.replaceWith(document.createTextNode('☁'))"></span>`;
+  }
+  if (key === 'pdf') {
+    return `<span class="materials-access-logo pdf" title="PDFs">📕</span>`;
+  }
+  return '';
+}
+
+function materialAccessLogosHtml(cadernos) {
+  const ordem = ['qconcursos', 'pdf', 'drive', 'youtube', 'estrategia'];
+  const found = new Set();
+  (Array.isArray(cadernos) ? cadernos : []).forEach(cad => {
+    const rotulo = materialRotulo(cad);
+    const url = String(cad && cad.url || '');
+    if (rotulo === 'QUEST' && isQconcursosUrl(url)) found.add('qconcursos');
+    const isDrive = isGoogleDriveUrl(url);
+    if (isDrive) found.add('drive');
+    else if (isPdfMaterial(cad)) found.add('pdf');
+    if (isYoutubeUrl(url) || (rotulo === 'VIDEO' && !isGoogleDriveUrl(url))) found.add('youtube');
+    if (isEstrategiaUrl(url)) found.add('estrategia');
+  });
+  const html = ordem.filter(key => found.has(key)).map(materialAccessLogoHtml).join('');
+  return html ? `<span class="materials-access-icons" aria-label="Tipos de materiais disponíveis">${html}</span>` : '';
+}
+
+function materialTypeSelectorIconHtml(tipo) {
+  const rotulo = String(tipo && tipo.rotulo || '').trim().toUpperCase();
+  if (rotulo === 'VIDEO') {
+    return `<span style="width:39px;height:36px;display:flex;align-items:center;justify-content:center"><img class="material-logo-img" src="${MATERIAL_LOGOS.youtube}" alt="YouTube" draggable="false" ondragstart="event.preventDefault()" style="max-width:39px;max-height:30px;object-fit:contain" onerror="this.replaceWith(document.createTextNode('🎥'))"></span>`;
+  }
+  return `<span style="font-size:33px;width:39px;text-align:center">${escapeHtml((tipo && tipo.emoji) || materialFallbackEmoji(rotulo))}</span>`;
+}
+
+function materialOpenAttrs(cad) {
+  const url = encodeURIComponent(String(cad && cad.url || ''));
+  const rotulo = encodeURIComponent(materialRotulo(cad));
+  return `data-url="${url}" data-rotulo="${rotulo}" onclick="abrirCaderno(event, decodeURIComponent(this.dataset.url || ''), decodeURIComponent(this.dataset.rotulo || ''))"`;
+}
+
+function materialIsStudied(cad) {
+  return !!(cad && (cad.estudado || cad.assistido || cad.concluido || cad.concluida));
+}
+
+function materialStudyToggleLabel(cad) {
+  const done = materialIsStudied(cad);
+  return done
+    ? 'Marcar como pendente'
+    : (materialRotulo(cad) === 'VIDEO' ? 'Marcar videoaula como assistida' : 'Marcar material como estudado');
+}
+
+function materialToggleButtonHtml(cad, scope) {
+  if (!scope || scope.idx == null || scope.idx < 0) return '';
+  const done = materialIsStudied(cad);
+  const tid = encodeURIComponent(String(scope.tid || ''));
+  const sid = encodeURIComponent(String(scope.sid || ''));
+  const title = materialStudyToggleLabel(cad);
+  return `<button type="button" class="material-done-toggle${done ? ' done' : ''}" title="${escapeHtml(title)}" data-tid="${tid}" data-sid="${sid}" data-idx="${scope.idx}" onclick="event.stopPropagation();toggleMaterialEstudado(decodeURIComponent(this.dataset.tid || ''), decodeURIComponent(this.dataset.sid || ''), Number(this.dataset.idx))">&#10003;</button>`;
+}
+
+function materialChipHtml(cad, mode, scope = {}) {
+  const isMateria = mode === 'materia';
+  const done = materialIsStudied(cad);
+  const chipClass = `${isMateria ? 'caderno-chip' : 'chip'} material-chip${done ? ' material-done' : ''}`;
+  const iconClass = isMateria ? 'caderno-emoji' : 'chip-emoji';
+  const labelClass = isMateria ? 'caderno-label' : 'chip-label';
+  const name = materialDisplayName(cad);
+  const title = [name, cad && cad.url].filter(Boolean).join(' - ');
+  const manageAttrs = isMateria ? ` oncontextmenu="event.preventDefault();event.stopPropagation();abrirMateriaisDoItem('', '')"` : '';
+  return `<div class="${chipClass}" ${materialOpenAttrs(cad)}${manageAttrs} title="${escapeHtml(title)}">
+    <div class="${iconClass}">${materialIconHtml(cad)}${materialToggleButtonHtml(cad, scope)}</div>
+    <div class="${labelClass}">${escapeHtml(name)}</div>
+  </div>`;
+}
+
+function materialStripHtml(cadernos, scope = {}) {
+  const lista = Array.isArray(cadernos) ? cadernos : [];
+  if (!lista.length) return '';
+  const cls = scope.sid ? 'linked-materials-row sub' : 'linked-materials-row';
+  return `<div class="${cls}">
+    <div class="linked-materials-list">
+      ${lista.map((cad, idx) => materialChipHtml(cad, 'topico', { ...scope, idx })).join('')}
+    </div>
+  </div>`;
+}
+
+function materialCounts(cadernos) {
+  const lista = Array.isArray(cadernos) ? cadernos : [];
+  return {
+    total: lista.length,
+    estudados: lista.filter(materialIsStudied).length,
+    porTipo: lista.reduce((acc, cad) => {
+      const key = materialRotulo(cad) || 'OUTRO';
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {})
+  };
+}
+
+function materialAccessButtonHtml(cadernos, scope = {}) {
+  const counts = materialCounts(cadernos);
+  const tid = encodeURIComponent(String(scope.tid || ''));
+  const sid = encodeURIComponent(String(scope.sid || ''));
+  if (!counts.total) {
+    return `<button type="button" class="materials-access-btn empty" title="Adicionar material de estudo" data-tid="${tid}" data-sid="${sid}" onclick="event.stopPropagation();adicionarMaterialPopup(decodeURIComponent(this.dataset.tid || ''), decodeURIComponent(this.dataset.sid || ''))">+</button>`;
+  }
+
+  const done = counts.estudados === counts.total;
+  const countText = counts.total ? `${counts.estudados}/${counts.total}` : '+';
+  const title = scope.sid ? 'Acessar materiais do subtópico' : 'Acessar materiais do tópico';
+  const logosHtml = materialAccessLogosHtml(cadernos);
+  return `<button type="button" class="materials-access-btn${done ? ' done' : ''}" title="${title}" data-tid="${tid}" data-sid="${sid}" onclick="event.stopPropagation();abrirMateriaisDoItem(decodeURIComponent(this.dataset.tid || ''), decodeURIComponent(this.dataset.sid || ''))">
+    <span class="materials-access-title">Acessar Materiais de Estudo</span>
+    ${logosHtml}
+    <span class="materials-access-count">${countText}</span>
+  </button>`;
+}
+
+function materialOwnerContext(tid, sid) {
+  if (sid) {
+    const owner = CT.getSubtopicos().find(x => x.id === sid);
+    const topico = owner ? CT.getTopico(owner.topicoId) : null;
+    return owner ? {
+      owner,
+      tipo: 'subtopico',
+      titulo: owner.nome || 'Subtópico',
+      subtitulo: topico ? topico.nome : '',
+      save: obj => CT.saveSubtopico(obj),
+      refresh: renderTopicos
+    } : null;
+  }
+
+  if (tid) {
+    const owner = CT.getTopico(tid);
+    return owner ? {
+      owner,
+      tipo: 'topico',
+      titulo: owner.nome || 'Tópico',
+      subtitulo: materia ? materia.nome : '',
+      save: obj => CT.saveTopico(obj),
+      refresh: renderTopicos
+    } : null;
+  }
+
+  const owner = CT.getMateria(mId);
+  return owner ? {
+    owner,
+    tipo: 'materia',
+    titulo: owner.nome || 'Matéria',
+    subtitulo: '',
+    save: obj => { CT.saveMateria(obj); materia = obj; },
+    refresh: renderCadernos
+  } : null;
+}
+
+function createMaterialId() {
+  const base = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `matlink_${base}_${rand}`;
+}
+
+function ensureMaterialIds(ctx) {
+  if (!ctx || !ctx.owner || !Array.isArray(ctx.owner.cadernos)) return false;
+  let changed = false;
+  const used = new Set();
+  ctx.owner.cadernos.forEach(cad => {
+    if (!cad) return;
+    let id = String(cad.id || '').trim();
+    if (!id || used.has(id)) {
+      id = createMaterialId();
+      cad.id = id;
+      changed = true;
+    }
+    used.add(id);
+  });
+  if (changed) ctx.save(ctx.owner);
+  return changed;
+}
+
+function materialIndexById(owner, materialId) {
+  const id = String(materialId || '');
+  return Array.isArray(owner && owner.cadernos)
+    ? owner.cadernos.findIndex(cad => String(cad && cad.id || '') === id)
+    : -1;
+}
+
+function materialFilterButtonHtml(tid, sid, filtroAtual, key, label, count) {
+  const tidEnc = encodeURIComponent(String(tid || ''));
+  const sidEnc = encodeURIComponent(String(sid || ''));
+  return `<button type="button" class="materials-filter-btn${filtroAtual === key ? ' active' : ''}" data-tid="${tidEnc}" data-sid="${sidEnc}" onclick="abrirMateriaisDoItem(decodeURIComponent(this.dataset.tid || ''), decodeURIComponent(this.dataset.sid || ''), '${key}')">${label}${count != null ? ` ${count}` : ''}</button>`;
+}
+
+function materialModalItemHtml(cad, idx, tid, sid) {
+  const done = materialIsStudied(cad);
+  const name = materialDisplayName(cad);
+  const rotulo = materialRotulo(cad);
+  const url = encodeURIComponent(String(cad && cad.url || ''));
+  const rotuloEnc = encodeURIComponent(rotulo);
+  const materialId = encodeURIComponent(String(cad && cad.id || ''));
+  const tidArg = escapeHtml(String(tid || ''));
+  const sidArg = escapeHtml(String(sid || ''));
+  const statusLabel = done ? 'Estudado' : (rotulo === 'VIDEO' ? 'Marcar assistida' : 'Marcar estudado');
+  return `<div class="materials-modal-item${done ? ' done' : ''}" draggable="true" data-material-id="${materialId}" data-tid="${encodeURIComponent(String(tid || ''))}" data-sid="${encodeURIComponent(String(sid || ''))}" ondragstart="materialDragStart(event)" ondragover="materialDragOver(event)" ondragleave="materialDragLeave(event)" ondrop="materialDrop(event)" ondragend="materialDragEnd(event)">
+    <div class="materials-drag-icon" title="Arrastar para reorganizar">${materialOptionIconHtml(cad)}</div>
+    <div class="materials-modal-info">
+      <div class="materials-modal-name-row">
+        <input class="materials-modal-name" value="${escapeHtml(name)}" data-tid="${encodeURIComponent(String(tid || ''))}" data-sid="${encodeURIComponent(String(sid || ''))}" data-material-id="${materialId}" oninput="autoSalvarNomeMaterialPopup(this)" onblur="autoSalvarNomeMaterialPopup(this, true)" onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}">
+      </div>
+      <div class="materials-modal-link">${escapeHtml(materialTypeLabel(rotulo))} | ${escapeHtml(cad && cad.url || '')}</div>
+    </div>
+    <div class="materials-modal-actions">
+      <button class="materials-action-btn" type="button" onclick="abrirEditarMaterialPopup('${tidArg}','${sidArg}',decodeURIComponent('${materialId}'))">Editar</button>
+      <button class="materials-action-btn" type="button" data-url="${url}" data-rotulo="${rotuloEnc}" onclick="abrirCaderno(event, decodeURIComponent(this.dataset.url || ''), decodeURIComponent(this.dataset.rotulo || ''))">Abrir</button>
+      <button class="materials-action-btn${done ? ' done' : ''}" type="button" onclick="toggleMaterialEstudadoPorId('${tidArg}','${sidArg}',decodeURIComponent('${materialId}'),true)">${statusLabel}</button>
+      <button class="materials-action-btn danger" type="button" onclick="deletarMaterialPopup('${tidArg}','${sidArg}',decodeURIComponent('${materialId}'))">Excluir</button>
+    </div>
+  </div>`;
+}
+
+function abrirMateriaisDoItem(tid = '', sid = '', filtro = null) {
+  const ctx = materialOwnerContext(tid, sid);
+  if (!ctx) return;
+  ensureMaterialIds(ctx);
+  const cadernos = Array.isArray(ctx.owner.cadernos) ? ctx.owner.cadernos : [];
+  window._materialPopupFilter = filtro || 'TODOS';
+  const filtroAtual = window._materialPopupFilter;
+  const counts = materialCounts(cadernos);
+  if (filtroAtual !== 'TODOS' && !(filtroAtual in counts.porTipo)) {
+    window._materialPopupFilter = 'TODOS';
+  }
+
+  const activeFilter = window._materialPopupFilter || 'TODOS';
+  const list = cadernos
+    .map((cad, idx) => ({ cad, idx }))
+    .filter(item => activeFilter === 'TODOS' || materialRotulo(item.cad) === activeFilter);
+  const old = document.getElementById('modalMateriaisItem');
+  if (old) old.remove();
+
+  const tidEnc = encodeURIComponent(String(tid || ''));
+  const sidEnc = encodeURIComponent(String(sid || ''));
+  const filtros = [
+    materialFilterButtonHtml(tid, sid, activeFilter, 'TODOS', 'Todos', cadernos.length),
+    ...CADERNO_TIPOS.map(tipo => materialFilterButtonHtml(tid, sid, activeFilter, tipo.rotulo, tipo.label || materialTypeLabel(tipo.rotulo), counts.porTipo[tipo.rotulo] || 0))
+  ].join('');
+  const itens = list.length
+    ? list.map(item => materialModalItemHtml(item.cad, item.idx, tid, sid)).join('')
+    : `<div class="materials-empty">Nenhum material neste filtro.</div>`;
+  const scopeLabel = ctx.tipo === 'subtopico' ? 'Materiais do subtópico' : (ctx.tipo === 'materia' ? 'Materiais da matéria' : 'Materiais do tópico');
+  const meta = counts.total
+    ? `${counts.estudados}/${counts.total} estudados`
+    : 'Nenhum material cadastrado';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modalMateriaisItem';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.72);z-index:10000;display:flex;align-items:center;justify-content:center;padding:18px';
+  overlay.innerHTML = `<div class="materials-modal" onclick="event.stopPropagation()">
+    <div class="materials-modal-head">
+      <div style="min-width:0">
+        <div class="materials-modal-kicker">${scopeLabel}</div>
+        <div class="materials-modal-title">${escapeHtml(ctx.titulo)}</div>
+        <div class="materials-modal-meta">
+          ${ctx.subtitulo ? `<span>${escapeHtml(ctx.subtitulo)}</span>` : ''}
+          <span>${escapeHtml(meta)}</span>
+        </div>
+      </div>
+      <button class="materials-modal-close" type="button" onclick="document.getElementById('modalMateriaisItem')?.remove()">×</button>
+    </div>
+    <div class="materials-modal-toolbar">
+      <div class="materials-filter-row">${filtros}</div>
+      <button class="materials-modal-add" type="button" data-tid="${tidEnc}" data-sid="${sidEnc}" onclick="adicionarMaterialPopup(decodeURIComponent(this.dataset.tid || ''), decodeURIComponent(this.dataset.sid || ''))">+ Adicionar material</button>
+    </div>
+    <div class="materials-modal-list">${itens}</div>
+  </div>`;
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+  overlay.addEventListener('mouseup', clearMaterialDragVisualState);
+  overlay.addEventListener('mouseleave', clearMaterialDragVisualState);
+}
+
+function materialOptionIconHtml(cad) {
+  return `<span class="material-option-icon" style="width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;font-size:27px;flex-shrink:0">${materialIconHtml(cad)}</span>`;
+}
+
+// ── MIGRAÇÃO DE DADOS (PDF EMOJI) ───────
+function normalizeMaterialMeta(cad) {
+  if (!cad) return false;
+  let changed = false;
+  const rotulo = materialRotulo(cad);
+  const rawName = String(cad.nome || '').trim();
+  const normalizedName = MATERIAL_LEGACY_NAMES[rawName];
+
+  if (rotulo && cad.rotulo !== rotulo) {
+    cad.rotulo = rotulo;
+    changed = true;
+  }
+  if (!rawName) {
+    cad.nome = materialDefaultName(rotulo);
+    changed = true;
+  } else if (normalizedName && cad.nome !== normalizedName) {
+    cad.nome = normalizedName;
+    changed = true;
+  }
+  if (rotulo === 'PDF' && (cad.emoji === '📄' || cad.emoji === '📖' || !cad.emoji)) {
+    cad.emoji = '📙';
+    changed = true;
+  }
+  if (rotulo === 'QUEST' && !cad.emoji) {
+    cad.emoji = '📓';
+    changed = true;
+  }
+  if (rotulo === 'VIDEO' && !cad.emoji) {
+    cad.emoji = '🎥';
+    changed = true;
+  }
+  if (rotulo === 'FLASH' && (cad.emoji === '\uD83C\uDCC4' || !cad.emoji)) {
+    cad.emoji = '🎴';
+    changed = true;
+  }
+  if (rotulo === 'NOTA' && !cad.emoji) { // [ADIÇÃO OODEUS]
+    cad.emoji = '📝';
+    changed = true;
+  }
+  return changed;
+}
+
+function CT_MigratePDFEmojis() {
+  const topicos = CT.getTopicos();
+  topicos.forEach(t => {
+    if (!t.cadernos) return;
+    let ch = false;
+    t.cadernos.forEach(c => { if (normalizeMaterialMeta(c)) ch = true; });
+    if (ch) CT.saveTopico(t);
+  });
+
+  const subs = CT.getSubtopicos();
+  subs.forEach(s => {
+    if (!s.cadernos) return;
+    let ch = false;
+    s.cadernos.forEach(c => { if (normalizeMaterialMeta(c)) ch = true; });
+    if (ch) CT.saveSubtopico(s);
+  });
+
+  const mats = CT.getMaterias();
+  mats.forEach(m => {
+    if (!m.cadernos) return;
+    let ch = false;
+    m.cadernos.forEach(c => { if (normalizeMaterialMeta(c)) ch = true; });
+    if (ch) CT.saveMateria(m);
+  });
+}
+
+// ── CADERNOS DA MATÉRIA ───────────────────
+function renderCadernos() {
+  const m = CT.getMateria(mId);
+  const cadernos = m.cadernos || [];
+  const el = document.getElementById('cadernos-materia');
+  el.innerHTML = cadernos.map((cad, idx) => materialChipHtml(cad, 'materia', { idx })).join('') +
+    (cadernos.length ? `<div class="caderno-manage" title="Gerenciar materiais da matéria" onclick="event.stopPropagation();abrirMateriaisDoItem('', '')">&#8942;</div>` : '') +
+    `<div class="caderno-add" title="Adicionar caderno" onclick="event.stopPropagation();abrirModalCaderno(null,null,true)">＋</div>`;
+}
+
+function adicionarCadernoMateria() {
+  abrirModalCaderno(null, null, true);
+}
+
+function toggleDicasTopicos(event) {
+  event.stopPropagation();
+  document.getElementById('dicasTopicos')?.classList.toggle('open');
+}
+
+document.addEventListener('click', (event) => {
+  const pop = document.getElementById('dicasTopicos');
+  if (!pop || !pop.classList.contains('open')) return;
+  if (event.target.closest('.tips-wrap')) return;
+  pop.classList.remove('open');
+});
+
+function deletarCadernoMateria(idx) {
+  const m = CT.getMateria(mId);
+  if (!m.cadernos) return;
+  m.cadernos.splice(idx, 1);
+  CT.saveMateria(m);
+  materia = m;
+  renderCadernos();
+}
+
+// ── RENDER TÓPICOS ────────────────────────
+function botaoCronometroLivreHtml(tid, sid = null) {
+  const tidAttr = encodeURIComponent(String(tid || ''));
+  const sidAttr = encodeURIComponent(String(sid || ''));
+  return `<button type="button" class="btn-crono-livre" title="Iniciar cronômetro livre para este item" data-tid="${tidAttr}" data-sid="${sidAttr}" onclick="iniciarCronometroLivreItem(event, decodeURIComponent(this.dataset.tid || ''), decodeURIComponent(this.dataset.sid || ''))">&#9201;&#65039;</button>`;
+}
+
+function iniciarCronometroLivreItem(event, tid, sid = '') {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  let topicoId = String(tid || '');
+  const subtopicoId = String(sid || '');
+  if (subtopicoId && !topicoId) {
+    const sub = CT.getSubtopico ? CT.getSubtopico(subtopicoId) : CT.getSubtopicos().find(s => s.id === subtopicoId);
+    topicoId = sub && sub.topicoId ? sub.topicoId : '';
+  }
+
+  const topico = topicoId ? CT.getTopico(topicoId) : null;
+  const preset = {
+    materiaId: (topico && topico.materiaId) || mId || '',
+    topicoId,
+    subtopicoId,
+    tipoEstudo: 'Estudo',
+    autoStart: true
+  };
+
+  if (typeof window.openFreeTimerPreset === 'function') {
+    window.openFreeTimerPreset(preset);
+    return;
+  }
+
+  setTimeout(() => {
+    if (typeof window.openFreeTimerPreset === 'function') window.openFreeTimerPreset(preset);
+  }, 60);
+}
+
+function jsArg(v) {
+  return String(v || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+
+function abrirRevisaoNaAba(revisaoId) {
+  if (!revisaoId) return;
+  goPage('revisoes.html?revisaoId=' + encodeURIComponent(revisaoId));
+}
+
+function revisaoBadgeHtml(rev, hoje) {
+  if (!rev) return '';
+  let classe = 'agendada';
+  let texto = `🗓 rev. ${fmtDate(rev.data)}`;
+  if (rev.data < hoje) {
+    classe = 'atrasada';
+    texto = `🔴 ${diasAtraso(rev.data)}d atrasada`;
+  } else if (rev.data === hoje) {
+    classe = 'hoje';
+    texto = '🟡 Revisão hoje';
+  }
+  return `<button type="button" class="revisao-badge ${classe}" title="Abrir esta revisão na aba Revisões" onclick="event.stopPropagation();abrirRevisaoNaAba('${jsArg(rev.id)}')">${texto}</button>`;
+}
+
+function botaoMarcarRevisaoHtml(tid, sid) {
+  return `<button type="button" class="btn-marcar-revisao" title="Marcar revisão manualmente" onclick="event.stopPropagation();abrirPopupMarcarRevisao('${jsArg(tid || '')}','${jsArg(sid || '')}')">🗓 Marcar Revisão</button>`;
+}
+
+function renderTopicos() {
+  const abertos = new Set();
+  document.querySelectorAll('.topico-card.open').forEach(el => abertos.add(el.id));
+  const topicos = CT.getTopicos(mId);
+  const revisoes = CT.getRevisoes();
+  const hoje = CT._today();
+  const container = document.getElementById('topicos-container');
+
+  if (!topicos.length) {
+    container.innerHTML = `<div style="text-align:center;padding:40px;color:var(--text3)">
+      Nenhum tópico cadastrado.<br>
+      <small>Importe o edital JSON ou adicione tópicos manualmente.</small>
+    </div>`;
+    return;
+  }
+
+  const htmlStr = topicos.map(t => {
+    const subs  = CT.getSubtopicos(t.id);
+    const q     = CT.calcStats(CT.getQuestoes({ topicoId: t.id }));
+    const rev   = revisoes.find(r => CT.revisaoPertenceAoTopico(r, t.id) && !r.concluida);
+    const revBadge = revisaoBadgeHtml(rev, hoje);
+
+    const pctBadge = q.pct != null
+      ? `<span class="pct-badge ${pctClass(q.pct)}">${q.pct}%</span>`
+      : '';
+
+    const btnEst = t.estudado
+      ? `<button class="btn-estudado done" data-tid="${t.id}" onclick="event.stopPropagation();reabrirTopico('${t.id}')">✅ Estudado</button>`
+      : `<button class="btn-estudado pendente" data-tid="${t.id}" onclick="event.stopPropagation();abrirPopupTopico('${t.id}')">✓</button>`;
+
+    const materialButton = materialAccessButtonHtml(t.cadernos, { tid: t.id });
+
+    const subHtml = subs.map(s => renderSubtopico(s)).join('');
+
+    const qHist = q.resolvidas > 0
+      ? `<div class="qhist-item">Resolvidas: <span>${q.resolvidas}</span></div>
+         <div class="qhist-item">Acertos: <span class="c">${q.acertos}</span></div>
+         <div class="qhist-item">Erros: <span class="e">${q.erros}</span></div>
+         <div class="qhist-item">Taxa: <span class="${pctClass(q.pct)}">${q.pct}%</span></div>`
+      : `<div style="font-size:12px;color:var(--text3)">Nenhuma questão registrada ainda.</div>`;
+
+    return `
+    <div class="topico-card${t.estudado?' estudado':''}" id="tc_${t.id}" draggable="true" ondragstart="dragStart(event, 'topico', '${t.id}')" ondragend="dragEnd(event)" ondragover="dragOver(event, 'topico')" ondragleave="dragLeave(event)" ondrop="drop(event, 'topico', '${t.id}')">
+      <div class="topico-header" onclick="toggleTopico('tc_${t.id}')">
+        <span class="topico-expand">›</span>
+        <div style="flex:1; min-width:0; display:flex; align-items:flex-start; gap:6px">
+          <span class="topico-nome" onclick="if(event.ctrlKey){event.stopPropagation();CT.copy(this.innerText)}">${t.nome}</span>
+          ${(t.cadernos && t.cadernos.length > 0) ? '' : (function(){
+            const m = CT.findMatches(t.nome, cId, 'topico');
+            return m.length > 0 ? `<span class="link-glow" title="Encontramos materiais deste tópico em outros concursos!" onclick="event.stopPropagation();abrirModalLink('${t.id}', '${t.nome.replace(/'/g, "\\'")}', 'topico')">🔗</span>` : '';
+          })()}
+        </div>
+        <div class="topico-actions">
+          ${botaoCronometroLivreHtml(t.id)}
+          ${materialButton}
+          ${revBadge}
+          ${btnEst}
+          ${botaoMarcarRevisaoHtml(t.id, null)}
+          <button onclick="event.stopPropagation();abrirOpcoes('${t.id}',null)" title="Opções do Tópico" style="padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text3);font-family:var(--sans);font-size:14px;cursor:pointer;transition:all 0.15s;flex-shrink:0" onmouseover="this.style.borderColor='var(--text3)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text3)'">⋮</button>
+        </div>
+        <div style="width:65px; flex-shrink:0; display:flex; justify-content:flex-end; margin-left:8px">
+          ${pctBadge}
+        </div>
+      </div>
+      <div class="topico-body">
+        <div class="questoes-inline">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+            <div class="questoes-title-row">
+              <div class="questoes-inline-title">📝 Questões</div>
+              <button type="button" class="btn-registrar-sessao" onclick="event.stopPropagation();abrirModalSessaoQuestoes('${t.id}', null)" id="btnEditQ_${t.id}">Registrar questões e horas de estudo</button>
+            </div>
+            <div class="quick-inputs">
+              <div class="quick-group"><span class="quick-label c">＋ Acertos</span>
+                <input class="quick-field acertos" id="qa_${t.id}" type="number" min="0" placeholder="0" onkeydown="if(event.key==='Enter')lancarAmbos('${t.id}',null,this)"></div>
+              <div class="quick-group"><span class="quick-label e">＋ Erros</span>
+                <input class="quick-field erros" id="qe_${t.id}" type="number" min="0" placeholder="0" onkeydown="if(event.key==='Enter')lancarAmbos('${t.id}',null,this)"></div>
+            </div>
+          </div>
+
+          <!-- TOTAIS ATUAIS -->
+          <div class="questoes-hist" id="qhist_${t.id}" style="margin-bottom:8px">${qHist}</div>
+
+          <!-- PAINEL DE EDIÇÃO (oculto por padrão) -->
+          <div id="editQ_${t.id}" style="display:none;background:var(--bg3);border:1px solid var(--border2);border-radius:10px;padding:14px;margin-bottom:8px">
+            <div style="font-size:12px;color:var(--text3);margin-bottom:12px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px">📊 Editar estatísticas do tópico</div>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px">
+              <div>
+                <div style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">✅ Acertos</div>
+                <input id="editAcertos_${t.id}" type="number" min="0" value="${q.acertos||0}"
+                  style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 6px;color:var(--green);font-family:var(--mono);font-size:16px;font-weight:700;text-align:center;outline:none">
+              </div>
+              <div>
+                <div style="font-size:12px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">❌ Erros</div>
+                <input id="editErros_${t.id}" type="number" min="0" value="${q.erros||0}"
+                  style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 6px;color:var(--red);font-family:var(--mono);font-size:16px;font-weight:700;text-align:center;outline:none">
+              </div>
+              <div>
+                <div style="font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">⏱ Horas</div>
+                <input id="editH_${t.id}" type="number" min="0" max="999" value="${Math.floor(CT.totalSegundos(CT.getSessoes({concursoId:cId,materiaId:mId}).filter(s=>s.topicoId===t.id))/3600)}"
+                  style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 6px;color:var(--accent);font-family:var(--mono);font-size:16px;font-weight:700;text-align:center;outline:none">
+              </div>
+              <div>
+                <div style="font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:4px">⏱ Min</div>
+                <input id="editMin_${t.id}" type="number" min="0" max="59" value="${Math.floor((CT.totalSegundos(CT.getSessoes({concursoId:cId,materiaId:mId}).filter(s=>s.topicoId===t.id))%3600)/60)}"
+                  style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:6px;padding:8px 6px;color:var(--accent);font-family:var(--mono);font-size:16px;font-weight:700;text-align:center;outline:none">
+              </div>
+            </div>
+            <div style="display:flex;gap:8px">
+              <button onclick="salvarEdicaoEstat('${t.id}')"
+                style="flex:1;padding:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:8px;color:#fff;font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer">
+                ✓ Salvar tudo
+              </button>
+              <button onclick="toggleEditarQ('${t.id}', null)"
+                style="padding:8px 14px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text3);font-family:var(--sans);font-size:12px;cursor:pointer">
+                Cancelar
+              </button>
+            </div>
+          </div>
+
+        </div> <!-- end questoes-inline -->
+        ${subHtml}
+        <button class="add-sub-btn" onclick="adicionarSubtopico('${t.id}')">＋ adicionar subtópico</button>
+      </div> <!-- end topico-body -->
+    </div>`;
+  }).join('');
+  container.innerHTML = htmlStr;
+  // Reabre os cards que estavam abertos
+  abertos.forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.classList.add('open');
+  });
+}
+
+function renderSubtopico(s) {
+  const q    = CT.calcStats(CT.getQuestoes({ subtopId: s.id }));
+  const pctB = q.pct != null ? `<span class="pct-badge ${pctClass(q.pct)}">${q.pct}%</span>` : '';
+  const rev  = CT.getRevisoes().find(r => CT.revisaoPertenceAoSubtopico(r, s.id) && !r.concluida);
+  const hoje = CT._today();
+  const revBadge = revisaoBadgeHtml(rev, hoje);
+
+  const materialButton = materialAccessButtonHtml(s.cadernos, { sid: s.id });
+
+  const btnEst = s.estudado
+    ? `<button class="btn-estudado done" style="font-size:12px;padding:3px 9px" onclick="reabrirSubtopico('${s.id}')">✅</button>`
+    : `<button class="btn-estudado pendente" style="font-size:12px;padding:3px 9px" onclick="abrirPopupSubtopico('${s.id}')">✓</button>`;
+
+  const qHist = q.resolvidas > 0
+    ? `<div class="questoes-hist" style="margin:6px 0">
+        <div class="qhist-item">Resolvidas: <span>${q.resolvidas}</span></div>
+        <div class="qhist-item">Acertos: <span class="c">${q.acertos}</span></div>
+        <div class="qhist-item">Erros: <span class="e">${q.erros}</span></div>
+        <div class="qhist-item">Taxa: <span class="${pctClass(q.pct)}">${q.pct}%</span></div>
+      </div>`
+    : `<div style="font-size:12px;color:var(--text3);margin:6px 0">Nenhuma questão registrada ainda.</div>`;
+
+  const subSess = CT.getSessoes().filter(ss => ss.subtopId === s.id);
+  const subSeg  = CT.totalSegundos(subSess);
+  return `
+  <div class="subtopico-row" id="sc_${s.id}" style="flex-direction:column;gap:0;padding:0;border-bottom:1px solid var(--border)" draggable="true" ondragstart="dragStart(event, 'subtopico', '${s.id}', '${s.topicoId}')" ondragend="dragEnd(event)" ondragover="dragOver(event, 'subtopico')" ondragleave="dragLeave(event)" ondrop="drop(event, 'subtopico', '${s.id}', '${s.topicoId}')">
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 0;flex-wrap:wrap;cursor:pointer" onclick="toggleSub('sc_${s.id}')">
+      <span style="font-size:12px;color:var(--text3);transition:transform 0.2s;display:inline-block" class="sub-expand">›</span>
+      <div class="sub-dot${s.estudado?' done':''}"></div>
+      <div style="flex:1; display:flex; align-items:flex-start; gap:6px; min-width:0">
+        <span class="sub-nome${s.estudado?' done':''}" onclick="if(event.ctrlKey){event.stopPropagation();CT.copy(this.innerText)}">${s.nome}</span>
+        ${(s.cadernos && s.cadernos.length > 0) ? '' : (function(){
+          const matches = CT.findMatches(s.nome, cId, 'subtopico');
+          return matches.length > 0 ? `<span class="link-glow" title="Encontramos materiais deste subtópico em outros concursos!" onclick="event.stopPropagation();abrirModalLink('${s.id}', '${s.nome.replace(/'/g, "\\'")}', 'subtopico')">🔗</span>` : '';
+        })()}
+      </div>
+      <div style="display:flex;align-items:center;gap:5px;flex-wrap:wrap;flex-shrink:0">
+        ${botaoCronometroLivreHtml(s.topicoId, s.id)}
+        ${materialButton}
+        ${revBadge}
+        ${btnEst}
+        ${botaoMarcarRevisaoHtml(s.topicoId, s.id)}
+        <button onclick="event.stopPropagation();abrirOpcoes(null,'${s.id}')" title="Opções" style="padding:3px 8px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text3);font-family:var(--sans);font-size:14px;cursor:pointer;transition:all 0.15s;flex-shrink:0" onmouseover="this.style.borderColor='var(--text3)';this.style.color='var(--text)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text3)'">⋮</button>
+      </div>
+      <div style="width:65px; flex-shrink:0; display:flex; justify-content:flex-end; margin-left:8px">
+        ${pctB}
+      </div>
+    </div>
+    <div class="sub-body" style="display:none;padding:0 0 10px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:4px" onclick="event.stopPropagation()">
+        <div class="questoes-title-row">
+          <div class="questoes-inline-title" style="font-size:12px">📝 Questões</div>
+          <button type="button" class="btn-registrar-sessao" onclick="event.stopPropagation();abrirModalSessaoQuestoes('${s.topicoId}','${s.id}')" id="btnEditQ_${s.id}">Registrar questões e horas de estudo</button>
+        </div>
+      </div>
+      ${qHist}
+      <div id="editQ_${s.id}" style="display:none;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:10px;margin-bottom:8px">
+        <div style="font-size:12px;color:var(--text3);margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:0.8px">📊 Editar estatísticas</div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:8px">
+          <div><div style="font-size:12px;font-weight:700;color:var(--green);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:3px">✅ Acertos</div>
+            <input id="editAcertos_${s.id}" type="number" min="0" value="${q.acertos||0}" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:5px;padding:6px 4px;color:var(--green);font-family:var(--mono);font-size:14px;font-weight:700;text-align:center;outline:none"></div>
+          <div><div style="font-size:12px;font-weight:700;color:var(--red);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:3px">❌ Erros</div>
+            <input id="editErros_${s.id}" type="number" min="0" value="${q.erros||0}" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:5px;padding:6px 4px;color:var(--red);font-family:var(--mono);font-size:14px;font-weight:700;text-align:center;outline:none"></div>
+          <div><div style="font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:3px">⏱ Horas</div>
+            <input id="editH_sub_${s.id}" type="number" min="0" value="${Math.floor(subSeg/3600)}" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:5px;padding:6px 4px;color:var(--accent);font-family:var(--mono);font-size:14px;font-weight:700;text-align:center;outline:none"></div>
+          <div><div style="font-size:12px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:3px">⏱ Min</div>
+            <input id="editMin_sub_${s.id}" type="number" min="0" max="59" value="${Math.floor((subSeg%3600)/60)}" style="width:100%;background:var(--bg2);border:1px solid var(--border2);border-radius:5px;padding:6px 4px;color:var(--accent);font-family:var(--mono);font-size:14px;font-weight:700;text-align:center;outline:none"></div>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button onclick="salvarEdicaoSubEstat('${s.id}','${s.topicoId}')" style="flex:1;padding:6px;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:6px;color:#fff;font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer">✓ Salvar</button>
+          <button onclick="toggleEditarQ('${s.topicoId}','${s.id}')" style="padding:6px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text3);font-family:var(--sans);font-size:12px;cursor:pointer">Cancelar</button>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div class="sub-quick" style="margin:0">
+          <div class="sub-quick-group"><span class="sub-quick-label c">＋ Acertos</span>
+            <input class="sub-quick-field c" id="sqa_${s.id}" type="number" min="0" placeholder="0"
+              onkeydown="if(event.key==='Enter')lancarAmbos('${s.topicoId}','${s.id}',this)"></div>
+          <div class="sub-quick-group"><span class="sub-quick-label e">＋ Erros</span>
+            <input class="sub-quick-field e" id="sqe_${s.id}" type="number" min="0" placeholder="0"
+              onkeydown="if(event.key==='Enter')lancarAmbos('${s.topicoId}','${s.id}',this)"></div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+// ── ESTUDADO / REABRIR ────────────────────
+function aplicarFocoRevisao() {
+  const params = new URLSearchParams(window.__CT_PAGE_SEARCH__ || location.search);
+  const tipo = params.get('foco');
+  const alvoId = params.get('id');
+  if (!alvoId || (tipo !== 'topico' && tipo !== 'subtopico')) return;
+
+  setTimeout(() => {
+    const sub = tipo === 'subtopico' ? CT.getSubtopico(alvoId) : null;
+    const topicoId = tipo === 'subtopico'
+      ? (params.get('topicoId') || sub?.topicoId || '')
+      : alvoId;
+    const topicoEl = document.getElementById('tc_' + topicoId);
+    if (!topicoEl) return;
+
+    document.querySelectorAll('.topico-card.open').forEach(el => {
+      if (el !== topicoEl) el.classList.remove('open');
+    });
+    document.querySelectorAll('.topico-card.sub-open').forEach(el => el.classList.remove('sub-open'));
+    topicoEl.classList.add('open');
+
+    let alvoEl = topicoEl;
+    if (tipo === 'subtopico') {
+      alvoEl = document.getElementById('sc_' + alvoId) || topicoEl;
+      document.querySelectorAll('.subtopico-row').forEach(row => {
+        const body = row.querySelector('.sub-body');
+        const arrow = row.querySelector('.sub-expand');
+        if (body) body.style.display = 'none';
+        if (arrow) arrow.style.transform = '';
+      });
+      const body = alvoEl.querySelector('.sub-body');
+      const arrow = alvoEl.querySelector('.sub-expand');
+      if (body) body.style.display = '';
+      if (arrow) arrow.style.transform = 'rotate(90deg)';
+      topicoEl.classList.add('sub-open');
+    }
+
+    alvoEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    alvoEl.classList.add('review-focus');
+    setTimeout(() => alvoEl.classList.remove('review-focus'), 2600);
+  }, 80);
+}
+
+function abrirPopupTopico(tid) {
+  popupTopicoId = tid; popupSubId = null;
+  const t = CT.getTopico(tid);
+  document.getElementById('popup-topico-name').textContent = t ? t.nome : '';
+  document.getElementById('popup-overlay').classList.add('visible');
+  document.querySelectorAll('.popup-opt').forEach((o,i) => o.classList.toggle('selected', i===0));
+  document.querySelector('.popup-custom input').value = '';
+}
+
+function abrirPopupSubtopico(sid) {
+  popupSubId = sid; popupTopicoId = null;
+  const s = CT.getSubtopicos().find(x => x.id === sid);
+  document.getElementById('popup-topico-name').textContent = s ? s.nome : '';
+  document.getElementById('popup-overlay').classList.add('visible');
+  document.querySelectorAll('.popup-opt').forEach((o,i) => o.classList.toggle('selected', i===0));
+  document.querySelector('.popup-custom input').value = '';
+}
+
+function confirmarEstudado() {
+  const selOpt = document.querySelector('.popup-opt.selected');
+  const diasNum = selOpt ? parseInt(selOpt.querySelector('.popup-opt-num').textContent) : null;
+  const dataCustom = document.querySelector('.popup-custom input').value;
+  let dataRevisao = null;
+  if (dataCustom) {
+    dataRevisao = dataCustom;
+  } else if (diasNum) {
+    const d = new Date(); d.setHours(12,0,0,0); d.setDate(d.getDate() + diasNum);
+    dataRevisao = CT._dateString(d);
+  }
+
+  if (popupTopicoId) {
+    CT.marcarEstudado(popupTopicoId, dataRevisao);
+  } else if (popupSubId) {
+    const s = CT.getSubtopicos().find(x => x.id === popupSubId);
+    if (s) {
+      if (typeof CT.registrarProgressoUnidadeEstudo === 'function') {
+        CT.registrarProgressoUnidadeEstudo({ concursoId: cId, materiaId: mId, topicoId: s.topicoId, subtopId: popupSubId, status: 'estudado' });
+      } else {
+        s.estudado = true;
+        s.estudadoEm = CT._today();
+        CT.saveSubtopico(s);
+      }
+    }
+    if (dataRevisao) CT.agendarRevisao(popupSubId, dataRevisao);
+  }
+  closePopup();
+  renderTopicos();
+  updateProgresso();
+}
+
+function naoRevisar() {
+  if (popupTopicoId) CT.marcarEstudado(popupTopicoId, null);
+  else if (popupSubId) {
+    const s = CT.getSubtopicos().find(x => x.id === popupSubId);
+    if (s) {
+      if (typeof CT.registrarProgressoUnidadeEstudo === 'function') {
+        CT.registrarProgressoUnidadeEstudo({ concursoId: cId, materiaId: mId, topicoId: s.topicoId, subtopId: popupSubId, status: 'estudado' });
+      } else {
+        s.estudado = true;
+        s.estudadoEm = CT._today();
+        CT.saveSubtopico(s);
+      }
+    }
+  }
+  closePopup();
+  renderTopicos();
+  updateProgresso();
+}
+
+async function reabrirTopico(tid) {
+  if (!(await CT.confirm('Desmarcar este tópico como estudado?', { title: 'Reabrir tópico', confirmLabel: 'Desmarcar', danger: false }))) return;
+  CT.desmarcarEstudado(tid);
+  renderTopicos();
+  updateProgresso();
+}
+
+async function reabrirSubtopico(sid) {
+  if (!(await CT.confirm('Desmarcar este subtópico como estudado?', { title: 'Reabrir subtópico', confirmLabel: 'Desmarcar', danger: false }))) return;
+  const s = CT.getSubtopicos().find(x => x.id === sid);
+  if (s) { s.estudado = false; s.estudadoEm = null; CT.saveSubtopico(s); }
+  renderTopicos();
+}
+
+// ── EDITAR TOTAIS ─────────────────────────
+function toggleEditarQ(tid, sid) {
+  const panelId = sid ? 'editQ_sub_' + sid : 'editQ_' + tid;
+  const btnId   = sid ? 'btnEditQ_sub_' + sid : 'btnEditQ_' + tid;
+  const panel   = document.getElementById(panelId);
+  const btn     = document.getElementById(btnId);
+  if (!panel) return;
+  const visible = panel.style.display !== 'none';
+  panel.style.display = visible ? 'none' : '';
+  if (btn) btn.textContent = visible ? '✏️ Editar totais' : '✕ Fechar';
+}
+
+function salvarEdicaoEstat(tid) {
+  // Salva questões
+  salvarEdicaoQ(tid, null, false);
+  // Salva horas
+  const h   = parseInt(document.getElementById('editH_'   + tid)?.value) || 0;
+  const min = parseInt(document.getElementById('editMin_' + tid)?.value) || 0;
+  const novosSeg = h * 3600 + min * 60;
+  // Remove todas as sessões anteriores vinculadas a este tópico
+  const sessoes = CT.getSessoes().filter(s => s.topicoId !== tid);
+  localStorage.setItem('ct_sessoes', JSON.stringify(sessoes));
+  // Salva nova sessão consolidada se houver horas
+  if (novosSeg > 0) {
+    CT.registrarSessao({ concursoId: cId, materiaId: mId, topicoId: tid, duracaoSegundos: novosSeg });
+  }
+  toggleEditarQ(tid, null);
+  renderTopicos();
+  updateProgresso();
+}
+
+function salvarEdicaoSubEstat(sid, tid) {
+  const ac = parseInt(document.getElementById('editAcertos_' + sid)?.value) || 0;
+  const er = parseInt(document.getElementById('editErros_' + sid)?.value) || 0;
+  const h = parseInt(document.getElementById('editH_sub_' + sid)?.value) || 0;
+  const m = parseInt(document.getElementById('editMin_sub_' + sid)?.value) || 0;
+  localStorage.setItem('ct_questoes', JSON.stringify(CT.getQuestoes().filter(q => q.subtopId !== sid)));
+  if (ac+er > 0) CT.lancarQuestoes({ topicoId: tid, subtopId: sid, materiaId: mId, concursoId: cId, resolvidas: ac + er, acertos: ac, erros: er });
+  localStorage.setItem('ct_sessoes', JSON.stringify(CT.getSessoes().filter(s => s.subtopId !== sid)));
+  if (h*3600 + m*60 > 0) CT.registrarSessao({ concursoId: cId, materiaId: mId, topicoId: tid, subtopId: sid, duracaoSegundos: h*3600 + m*60 });
+  toggleEditarQ(tid, sid); renderTopicos(); updateProgresso();
+}
+
+function salvarEdicaoQ(tid, sid, fechar = true) {
+  const acId = sid ? 'editAcertos_sub_' + sid : 'editAcertos_' + tid;
+  const erId = sid ? 'editErros_sub_'   + sid : 'editErros_'   + tid;
+  const acertos  = parseInt(document.getElementById(acId)?.value) || 0;
+  const erros    = parseInt(document.getElementById(erId)?.value) || 0;
+  const total    = acertos + erros;
+
+  // Remove todos os lançamentos anteriores deste tópico/subtópico
+  const filtro = sid ? { subtopId: sid } : { topicoId: tid, subtopId: null };
+  const todas  = CT.getQuestoes();
+  const filtradas = todas.filter(q => {
+    if (sid) return q.subtopId !== sid;
+    return q.topicoId !== tid || q.subtopId; // mantém lançamentos de subtópicos
+  });
+  localStorage.setItem('ct_questoes', JSON.stringify(filtradas));
+
+  // Salva um único lançamento com os totais corrigidos
+  if (total > 0) {
+    CT.lancarQuestoes({
+      topicoId:  tid,
+      subtopId:  sid || null,
+      materiaId: mId,
+      concursoId: cId,
+      resolvidas: total,
+      acertos,
+      erros,
+    });
+  }
+
+  if (fechar) { toggleEditarQ(tid, sid); renderTopicos(); updateProgresso(); }
+}
+function lancarAmbos(tid, sid, inputEl) {
+  // Lê os dois campos do mesmo tópico/subtópico
+  const aId = sid ? 'sqa_' + sid : 'qa_' + tid;
+  const eId = sid ? 'sqe_' + sid : 'qe_' + tid;
+  const acertos = parseInt(document.getElementById(aId)?.value) || 0;
+  const erros   = parseInt(document.getElementById(eId)?.value) || 0;
+  if (acertos === 0 && erros === 0) return;
+  const dados = {
+    materiaId: mId, concursoId: cId, topicoId: tid,
+    resolvidas: acertos + erros, acertos, erros
+  };
+  if (sid) dados.subtopId = sid;
+  CT.lancarQuestoes(dados);
+  // Flash verde nos dois campos
+  [aId, eId].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.value = '';
+      el.style.borderColor = 'var(--green)';
+      setTimeout(() => { el.style.borderColor = ''; }, 800);
+    }
+  });
+  renderTopicos();
+  updateProgresso();
+}
+
+// ── HORAS MANUAIS ─────────────────────────
+function abrirAddHoras(tid) {
+  const panel = document.getElementById('addHoras_' + tid);
+  if (!panel) return;
+  panel.style.display = panel.style.display === 'none' ? '' : 'none';
+}
+
+function salvarHoras(tid) {
+  const h = parseInt(document.getElementById('addH_' + tid)?.value) || 0;
+  const m = parseInt(document.getElementById('addM_' + tid)?.value) || 0;
+  const segundos = h * 3600 + m * 60;
+  if (segundos <= 0) { alert('Informe pelo menos 1 minuto.'); return; }
+  CT.registrarSessao({
+    concursoId: cId,
+    materiaId: mId,
+    topicoId: tid,
+    duracaoSegundos: segundos,
+  });
+  document.getElementById('addHoras_' + tid).style.display = 'none';
+  document.getElementById('addH_' + tid).value = 0;
+  document.getElementById('addM_' + tid).value = 0;
+  updateProgresso();
+  // Flash feedback
+  const btn = document.querySelector(`#tc_${tid} [onclick*="abrirAddHoras"]`);
+  if (btn) {
+    const orig = btn.textContent;
+    btn.textContent = '✅ Salvo!';
+    btn.style.color = 'var(--green)';
+    btn.style.borderColor = 'var(--green)';
+    setTimeout(() => { btn.textContent = orig; btn.style.color=''; btn.style.borderColor=''; }, 1500);
+  }
+}
+
+function abrirModalSessaoQuestoes(tid, sid) {
+  const existente = document.getElementById('modalSessaoQuestoes');
+  if (existente) existente.remove();
+
+  const topico = CT.getTopico(tid);
+  const subtopico = sid ? CT.getSubtopicos().find(s => s.id === sid) : null;
+  const alvoNome = subtopico ? subtopico.nome : (topico ? topico.nome : 'item selecionado');
+  const overlay = document.createElement('div');
+  overlay.className = 'popup-overlay visible';
+  overlay.id = 'modalSessaoQuestoes';
+  overlay.onclick = e => { if (e.target === overlay) fecharModalSessaoQuestoes(); };
+  overlay.innerHTML = `
+    <div class="popup-card" style="max-width:540px;max-height:92vh;overflow-y:auto" onclick="event.stopPropagation()">
+      <div class="popup-title">Registrar sessão</div>
+      <div class="popup-subtitle" style="margin-bottom:12px">${alvoNome}</div>
+      <div class="sessao-modal-grid">
+        <div class="sessao-modal-field" style="grid-column:1/-1"><label for="sessaoData">Data do estudo</label><input id="sessaoData" type="date" max="${CT._today()}" value="${CT._today()}"></div>
+        <div class="sessao-modal-field"><label for="sessaoAcertos">Acertos</label><input id="sessaoAcertos" type="number" min="0" step="1" placeholder="0"></div>
+        <div class="sessao-modal-field"><label for="sessaoErros">Erros</label><input id="sessaoErros" type="number" min="0" step="1" placeholder="0"></div>
+        <div class="sessao-modal-field"><label for="sessaoHoras">Horas</label><input id="sessaoHoras" type="number" min="0" step="1" placeholder="0"></div>
+        <div class="sessao-modal-field"><label for="sessaoMinutos">Minutos</label><input id="sessaoMinutos" type="number" min="0" max="59" step="1" placeholder="0"></div>
+      </div>
+      <div class="sessao-extra-box">
+        <div class="sessao-extra-title">Estatísticas opcionais</div>
+        <div class="sessao-extra-grid">
+          <div class="sessao-modal-field"><label for="sessaoPaginasPdf">Páginas lidas PDF/Livro</label><input id="sessaoPaginasPdf" type="number" min="0" step="1" placeholder="0"></div>
+          <div class="sessao-modal-field"><label for="sessaoVideoMinutos">Minutos assistidos de videoaulas</label><input id="sessaoVideoMinutos" type="number" min="0" step="1" placeholder="0"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="popup-btn-skip" onclick="fecharModalSessaoQuestoes()">Cancelar</button>
+        <button class="popup-btn-ok" onclick="salvarModalSessaoQuestoes('${tid}','${sid || ''}')">Salvar</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('sessaoAcertos')?.focus(), 0);
+}
+
+function fecharModalSessaoQuestoes() {
+  document.getElementById('modalSessaoQuestoes')?.remove();
+}
+
+function lerInteiroNaoNegativo(id) {
+  const el = document.getElementById(id);
+  const n = parseInt(el?.value, 10);
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function salvarModalSessaoQuestoes(tid, sid) {
+  const acertos = lerInteiroNaoNegativo('sessaoAcertos');
+  const erros = lerInteiroNaoNegativo('sessaoErros');
+  const horas = lerInteiroNaoNegativo('sessaoHoras');
+  const minutos = lerInteiroNaoNegativo('sessaoMinutos');
+  const segundos = horas * 3600 + minutos * 60;
+  const metricas = CT.limparMetricasSessao ? CT.limparMetricasSessao({
+    paginasPdf: lerInteiroNaoNegativo('sessaoPaginasPdf'),
+    videoMinutos: lerInteiroNaoNegativo('sessaoVideoMinutos')
+  }) : {};
+  const temMetricas = Object.keys(metricas).length > 0;
+  const dataLancamento = CT._normalizeDateString(document.getElementById('sessaoData')?.value);
+
+  if (acertos + erros <= 0 && segundos <= 0 && !temMetricas) {
+    alert('Informe questões, tempo de estudo ou alguma estatística opcional.');
+    return;
+  }
+
+  if (dataLancamento > CT._today()) {
+    alert('Escolha hoje ou uma data anterior para o lançamento.');
+    return;
+  }
+
+  if (segundos > 0 || temMetricas) {
+    const sessao = { concursoId: cId, materiaId: mId, topicoId: tid, duracaoSegundos: segundos, data: dataLancamento };
+    if (temMetricas) sessao.metricas = metricas;
+    if (sid) sessao.subtopId = sid;
+    CT.registrarSessao(sessao);
+  }
+
+  if (acertos + erros > 0) {
+    const questoes = { concursoId: cId, materiaId: mId, topicoId: tid, resolvidas: acertos + erros, acertos, erros, data: dataLancamento };
+    if (sid) questoes.subtopId = sid;
+    CT.lancarQuestoes(questoes);
+  }
+
+  fecharModalSessaoQuestoes();
+  updateProgresso();
+  renderTopicos();
+}
+
+// mantido por compatibilidade com cole input
+function lancarRapido(tid, sid, tipo, val, inputEl) {
+  const n = parseInt(val);
+  if (!n || n <= 0) return;
+  const dados = { materiaId: mId, concursoId: cId, topicoId: tid };
+  if (sid) dados.subtopId = sid;
+  if (tipo === 'acertos') { dados.resolvidas = n; dados.acertos = n; dados.erros = 0; }
+  else { dados.resolvidas = n; dados.acertos = 0; dados.erros = n; }
+  CT.lancarQuestoes(dados);
+  inputEl.value = '';
+  inputEl.style.borderColor = 'var(--green)';
+  setTimeout(() => { inputEl.style.borderColor = ''; }, 800);
+  renderTopicos();
+  updateProgresso();
+}
+
+function lancarCole(tid, sid, inputId) {
+  const val = document.getElementById(inputId)?.value || '';
+  const m = val.match(/Resolvidas:\s*(\d+)\s+Acertos:\s*(\d+)\s+Erros:\s*(\d+)/i);
+  const el = document.getElementById(inputId);
+  if (!m) {
+    if (el) { el.style.borderColor = 'var(--red)'; setTimeout(() => el.style.borderColor = '', 1500); }
+    return;
+  }
+  const dados = {
+    materiaId: mId, concursoId: cId, topicoId: tid,
+    resolvidas: parseInt(m[1]), acertos: parseInt(m[2]), erros: parseInt(m[3])
+  };
+  if (sid) dados.subtopId = sid;
+  CT.lancarQuestoes(dados);
+  if (el) { el.value = ''; el.style.borderColor = 'var(--green)'; setTimeout(() => el.style.borderColor = '', 800); }
+  renderTopicos();
+  updateProgresso();
+}
+
+async function colarCole(tid, sid, inputId) {
+  try {
+    const text = await navigator.clipboard.readText();
+    const el = document.getElementById(inputId);
+    if (el) el.value = text;
+    lancarCole(tid, sid, inputId);
+  } catch {
+    alert('Cole manualmente e pressione Enter.');
+  }
+}
+
+function desfazerLancamento(tid, sid) {
+  CT.desfazerUltimoLancamento({ topicoId: tid, subtopId: sid });
+  renderTopicos();
+  updateProgresso();
+}
+
+// ── CADERNOS POR TÓPICO ───────────────────
+const CADERNO_TIPOS = [
+  { emoji: '📓', nome: 'Caderno de Questões', rotulo: 'QUEST', label: 'Caderno de Questões' },
+  { emoji: '📙', nome: 'PDF de Aulas',         rotulo: 'PDF',   label: 'PDF' },
+  { emoji: '🎥', nome: 'Videoaula',            rotulo: 'VIDEO', label: 'Videoaula' },
+  { emoji: '🎴', nome: 'Flashcards',           rotulo: 'FLASH', label: 'Flashcards' },
+  { emoji: '📝', nome: 'Anotações',            rotulo: 'NOTA',  label: 'Anotações' }, // [ADIÇÃO OODEUS]
+];
+
+let _modalTid = null, _modalSid = null, _modalMateria = false, _modalTipoSel = 0;
+let _modalReturnMaterials = null;
+
+// [R24] wikilink do Obsidian no campo Link: é nota do vault, não URL externa.
+function ehLinkWiki(url) { return /^\[\[[^\]]+\]\]$/.test(String(url || '').trim()); }
+function notaDeLinkWiki(url) {
+  return String(url || '').trim().replace(/^\[\[|\]\]$/g, '').replace(/\.md$/i, '');
+}
+
+function abrirModalCaderno(tid, sid, isMateria) {
+  const old = document.getElementById('modalCaderno');
+  if (old) old.remove();
+
+  _modalReturnMaterials = null;
+  _modalTid = tid; _modalSid = sid; _modalMateria = !!isMateria;
+  _modalTipoSel = 0;
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modalCaderno';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.73);backdrop-filter:blur(3px);z-index:9999;display:flex;align-items:center;justify-content:center';
+
+  const tiposHtml = CADERNO_TIPOS.map((t, i) =>
+    `<div id="mTipo${i}" onclick="selecionarTipoModal(${i})"
+      style="display:flex;align-items:center;gap:10px;padding:12px 14px;
+      background:var(--bg3);border:1px solid ${i===0?'var(--accent)':'var(--border)'};
+      border-radius:10px;cursor:pointer">
+      ${materialTypeSelectorIconHtml(t)}
+      <span style="font-size:12px;font-weight:600;color:${i===0?'var(--accent)':'var(--text2)'};line-height:1.15">${t.label || materialTypeLabel(t.rotulo)}</span>
+    </div>`
+  ).join('');
+
+  overlay.innerHTML = `
+    <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:16px;
+      padding:28px;width:460px;max-width:92vw;box-shadow:0 24px 60px rgba(0,0,0,0.6)">
+      <div style="font-size:17px;font-weight:700;color:var(--text);margin-bottom:4px">Material de estudo</div>
+      <div style="font-size:12px;color:var(--text3);margin-bottom:18px">Escolha o tipo, nomeie e cole o link</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:18px">${tiposHtml}</div>
+      <div style="margin-bottom:12px">
+        <div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text3);margin-bottom:6px">Nome</div>
+        <input id="modalNomeInput" type="text" placeholder="${CADERNO_TIPOS[0].nome}"
+          style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
+          padding:10px 14px;color:var(--text);font-family:var(--sans);font-size:12px;outline:none;box-sizing:border-box"
+          onkeydown="if(event.key==='Enter')document.getElementById('modalLinkInput')?.focus()">
+      </div>
+      <div style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text3);margin-bottom:6px">Link</div>
+        <input id="modalLinkInput" type="text" placeholder="https://... ou C:\\caminho\\arquivo.pdf"
+          style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
+          padding:10px 14px;color:var(--text);font-family:var(--sans);font-size:12px;outline:none;box-sizing:border-box"
+          onkeydown="if(event.key==='Enter')confirmarModalCaderno(true)">
+        <button id="modalNotaBtn" type="button" onclick="buscarNotaVault('modalLinkInput')" style="display:none;margin-top:8px;padding:8px 12px;border:1px dashed var(--accent);border-radius:8px;background:transparent;color:var(--accent);font-family:var(--sans);font-size:12px;cursor:pointer">🔍 Buscar nota do vault</button>
+      </div>
+      <div id="modalAddFeedback" style="min-height:16px;font-size:11px;color:var(--green);margin-top:-6px;margin-bottom:10px"></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <button onclick="fecharModalCaderno()"
+          style="padding:10px 18px;border:1px solid var(--border);border-radius:8px;
+          background:transparent;color:var(--text3);font-family:var(--sans);font-size:14px;cursor:pointer">
+          Cancelar
+        </button>
+        <button onclick="confirmarModalCaderno(true)"
+          style="flex:1;min-width:160px;padding:10px;background:var(--bg3);border:1px solid var(--accent);
+          border-radius:8px;color:var(--accent);font-family:var(--sans);font-size:14px;font-weight:700;cursor:pointer">
+          + Adicionar em sequência
+        </button>
+        <button onclick="confirmarModalCaderno(false)"
+          style="flex:1;min-width:120px;padding:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+          border:none;border-radius:8px;color:#fff;font-family:var(--sans);font-size:14px;font-weight:600;cursor:pointer">
+          Adicionar
+        </button>
+      </div>
+
+      </div>
+    </div>`;
+
+  overlay.addEventListener('click', e => { if (e.target === overlay) fecharModalCaderno(); });
+  document.body.appendChild(overlay);
+  // [R23] digitar `[[` no Link abre o autocomplete de notas do vault.
+  conectarWikiNoCampo('modalLinkInput');
+  setTimeout(() => document.getElementById('modalLinkInput')?.focus(), 50);
+}
+
+function toggleBuscaManualModal() {
+  const area = document.getElementById('modalSearchArea');
+  const btn = document.getElementById('btnShowSearch');
+  if (area.style.display === 'none') {
+    area.style.display = 'block';
+    btn.style.color = 'var(--accent)';
+    document.getElementById('modalSearchField').focus();
+  } else {
+    area.style.display = 'none';
+    btn.style.color = 'var(--text3)';
+  }
+}
+
+function buscarManualInModal() {
+  const q = document.getElementById('modalSearchField').value.trim();
+  if (!q) return;
+  fecharModalCaderno();
+  const targetId = _modalSid || _modalTid || mId;
+  const type = _modalSid ? 'subtopico' : (_modalTid ? 'topico' : 'materia');
+  abrirModalLink(targetId, q, type);
+}
+
+function selecionarTipoModal(i) {
+  _modalTipoSel = i;
+  CADERNO_TIPOS.forEach((_, idx) => {
+    const el = document.getElementById('mTipo' + idx);
+    if (!el) return;
+    el.style.borderColor = idx === i ? 'var(--accent)' : 'var(--border)';
+    el.querySelector('span:last-child').style.color = idx === i ? 'var(--accent)' : 'var(--text2)';
+  });
+  atualizarPlaceholderNomeMaterial();
+  atualizarCamposNotaModal();
+}
+
+function atualizarPlaceholderNomeMaterial() {
+  const input = document.getElementById('modalNomeInput');
+  const tipo = CADERNO_TIPOS[_modalTipoSel];
+  if (input && tipo) input.placeholder = tipo.nome;
+}
+
+// [ADIÇÃO OODEUS] NOTA: busca fuzzy de notas do vault (host.pickVaultNote) —
+// o caminho escolhido vira o "link" do material; abertura via host.openVaultNote.
+function atualizarCamposNotaModal() {
+  const tipo = CADERNO_TIPOS[_modalTipoSel] || CADERNO_TIPOS[0];
+  const btn = document.getElementById('modalNotaBtn');
+  if (btn) btn.style.display = tipo.rotulo === 'NOTA' ? 'inline-block' : 'none';
+  const li = document.getElementById('modalLinkInput');
+  if (li) li.placeholder = tipo.rotulo === 'NOTA'
+    ? 'Escolha uma nota do vault com o botão acima'
+    : 'https://... ou C:\\caminho\\arquivo.pdf';
+}
+
+function buscarNotaVault(inputId) {
+  const h = window.__CT_HOST__;
+  if (!h || typeof h.pickVaultNote !== 'function') {
+    alert('A busca de notas do vault requer o host do plugin Track do Oodeus.');
+    return;
+  }
+  h.pickVaultNote(path => {
+    if (!path) return;
+    const li = document.getElementById(inputId);
+    if (li) { li.value = path; li.focus(); }
+  });
+}
+
+// [R23] Autocomplete `[[` no campo Link — mesma sensação do Obsidian: ao
+// digitar dois colchetes, sugere notas do vault; escolher insere o wikilink.
+function fecharSugestoesWiki() {
+  const box = document.getElementById('ctVaultWikiSuggest');
+  if (box) box.remove();
+}
+
+function sugerirNotasWiki(input) {
+  const h = window.__CT_HOST__;
+  const notas = h && typeof h.listVaultNotes === 'function' ? (h.listVaultNotes() || []) : [];
+  const caret = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+  const antes = input.value.slice(0, caret);
+  const inicio = antes.lastIndexOf('[[');
+  fecharSugestoesWiki();
+  if (inicio === -1) return;
+  // Um `[[` significa nota do vault: seleciona Anotações automaticamente para
+  // que o cadastro não caia na checagem de URL externa (https://).
+  const idxNota = CADERNO_TIPOS.findIndex(t => t.rotulo === 'NOTA');
+  if (idxNota >= 0) selecionarTipoModal(idxNota);
+  const query = antes.slice(inicio + 2);
+  if (/[\]\]\n]/.test(query)) return;
+  const q = query.trim().toLowerCase();
+  const lista = notas.filter(p => !q || String(p).toLowerCase().includes(q)).slice(0, 8);
+  if (!lista.length) return;
+  const box = document.createElement('div');
+  box.id = 'ctVaultWikiSuggest';
+  box.style.cssText = 'position:fixed;z-index:10005;max-height:240px;overflow:auto;' +
+    'background:var(--bg2);border:1px solid var(--border2);border-radius:8px;padding:6px;' +
+    'box-shadow:0 12px 32px rgba(0,0,0,.5);min-width:260px';
+  const r = input.getBoundingClientRect();
+  box.style.left = Math.round(r.left) + 'px';
+  box.style.top = Math.round(r.bottom + 4) + 'px';
+  lista.forEach(path => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('data-note', path);
+    const nome = String(path).split('/').pop().replace(/\.md$/i, '');
+    b.textContent = nome;
+    b.title = path;
+    b.style.cssText = 'display:block;width:100%;text-align:left;padding:7px 10px;border:0;' +
+      'border-radius:6px;background:transparent;color:var(--text);font-size:12px;cursor:pointer';
+    b.addEventListener('click', (e) => {
+      e.preventDefault();
+      const nomeNota = String(path).replace(/\.md$/i, '');
+      const fim = typeof input.selectionStart === 'number' ? input.selectionStart : input.value.length;
+      input.value = input.value.slice(0, inicio) + '[[' + nomeNota + ']]' + input.value.slice(fim);
+      const pos = inicio + 2 + nomeNota.length + 2;
+      input.focus();
+      try { input.setSelectionRange(pos, pos); } catch (_) { /* noop */ }
+      fecharSugestoesWiki();
+    });
+    box.appendChild(b);
+  });
+  document.body.appendChild(box);
+}
+
+function conectarWikiNoCampo(inputId) {
+  const input = document.getElementById(inputId);
+  if (!input || input.__ctWikiBound) return;
+  input.__ctWikiBound = true;
+  const origKeydown = input.onkeydown;
+  input.addEventListener('input', () => sugerirNotasWiki(input));
+  input.addEventListener('keydown', (e) => {
+    const box = document.getElementById('ctVaultWikiSuggest');
+    if (!box || !box.querySelector('[data-note]')) {
+      if (origKeydown) origKeydown.call(input, e);
+      return;
+    }
+    if (e.key === 'Escape') {
+      fecharSugestoesWiki(); e.preventDefault(); e.stopImmediatePropagation(); return;
+    }
+    if (e.key === 'Enter') {
+      const first = box.querySelector('[data-note]');
+      if (first) first.click();
+      e.preventDefault(); e.stopImmediatePropagation(); return;
+    }
+    if (origKeydown) origKeydown.call(input, e);
+  });
+  input.addEventListener('blur', () => setTimeout(fecharSugestoesWiki, 180));
+}
+
+function fecharModalCaderno() {
+  fecharSugestoesWiki();
+  const m = document.getElementById('modalCaderno');
+  if (m) m.remove();
+}
+
+function confirmarModalCaderno(continuar = false) {
+  const linkInput = document.getElementById('modalLinkInput');
+  const nomeInput = document.getElementById('modalNomeInput');
+  let url = linkInput.value.trim();
+  
+  // Remove aspas no início e no fim
+  url = url.replace(/^["']+|["']+$/g, '');
+  
+  // Se for um caminho do Windows (começa com letra de unidade e barra)
+  if (/^[a-zA-Z]:[\\/]/.test(url)) {
+    // Converte barras invertidas para barras normais e adiciona prefixo file:///
+    url = 'file:///' + url.replace(/\\/g, '/');
+  }
+
+  if (!url || url === 'https://') { 
+    linkInput.style.borderColor = 'var(--red)';
+    setTimeout(() => linkInput.style.borderColor = '', 1200);
+    return;
+  }
+  const tipo = CADERNO_TIPOS[_modalTipoSel];
+  // [ADIÇÃO OODEUS] NOTA: url é o caminho da nota no vault (não é URL externa —
+  // a checagem de segurança é para links http/file)
+  const info = (tipo.rotulo === 'NOTA' || ehLinkWiki(url))
+    ? { ok: true, url }
+    : (CT._safeMaterialUrlInfo
+        ? CT._safeMaterialUrlInfo(url, { allowInternalFlash: tipo.rotulo === 'FLASH' })
+        : { ok: true, url });
+  if (!info.ok) {
+    linkInput.style.borderColor = 'var(--red)';
+    setTimeout(() => linkInput.style.borderColor = '', 1200);
+    alert('Link bloqueado por seguranca:\n' + (info.reason || 'URL inválida.'));
+    return;
+  }
+  url = info.url;
+  const nome = (nomeInput?.value || '').trim() || tipo.nome;
+  const cad = { id: createMaterialId(), rotulo: tipo.rotulo, url, nome, emoji: tipo.emoji, estudado: false, estudadoEm: null };
+  if (tipo.rotulo === 'VIDEO') {
+    cad.assistido = false;
+    cad.assistidoEm = null;
+  }
+
+  if (_modalMateria) {
+    const m = CT.getMateria(mId); m.cadernos = m.cadernos||[]; m.cadernos.push(cad); CT.saveMateria(m);
+    materia = m;
+    renderCadernos();
+  } else if (_modalTid) {
+    const t = CT.getTopico(_modalTid); t.cadernos = t.cadernos||[]; t.cadernos.push(cad); CT.saveTopico(t);
+    renderTopicos();
+  } else if (_modalSid) {
+    const s = CT.getSubtopicos().find(x=>x.id===_modalSid); s.cadernos=s.cadernos||[]; s.cadernos.push(cad); CT.saveSubtopico(s);
+    renderTopicos();
+  }
+
+  if (!continuar) {
+    const returnTarget = _modalReturnMaterials;
+    fecharModalCaderno();
+    _modalReturnMaterials = null;
+    if (returnTarget) abrirMateriaisDoItem(returnTarget.tid || '', returnTarget.sid || '', window._materialPopupFilter || 'TODOS');
+    return;
+  }
+
+  if (nomeInput) nomeInput.value = '';
+  if (linkInput) {
+    linkInput.value = '';
+    linkInput.style.borderColor = 'var(--green)';
+    setTimeout(() => { if (linkInput) linkInput.style.borderColor = ''; }, 900);
+    linkInput.focus();
+  }
+  const feedback = document.getElementById('modalAddFeedback');
+  if (feedback) {
+    feedback.textContent = `${materialDisplayName(cad)} adicionado.`;
+    setTimeout(() => { if (feedback) feedback.textContent = ''; }, 1600);
+  }
+}
+
+function adicionarCadernoTopico(tid, sid) {
+  abrirModalCaderno(tid, sid, false);
+}
+
+function deletarCadernoTopico(tid, sid, idx) {
+  if (tid) {
+    const t = CT.getTopico(tid);
+    if (t && t.cadernos) { t.cadernos.splice(idx,1); CT.saveTopico(t); }
+  } else if (sid) {
+    const s = CT.getSubtopicos().find(x=>x.id===sid);
+    if (s && s.cadernos) { s.cadernos.splice(idx,1); CT.saveSubtopico(s); }
+  }
+  renderTopicos();
+}
+
+function autoSalvarNomeMaterialPopup(input, imediato = false) {
+  if (!input) return;
+  const tid = decodeURIComponent(input.dataset.tid || '');
+  const sid = decodeURIComponent(input.dataset.sid || '');
+  const materialId = decodeURIComponent(input.dataset.materialId || '');
+  const key = `${tid || 'materia'}|${sid || ''}|${materialId}`;
+  window._materialNameSaveTimers = window._materialNameSaveTimers || {};
+  if (window._materialNameSaveTimers[key]) clearTimeout(window._materialNameSaveTimers[key]);
+
+  const run = () => {
+    delete window._materialNameSaveTimers[key];
+    salvarNomeMaterialPopup(tid, sid, materialId, input);
+  };
+
+  if (imediato) {
+    run();
+  } else {
+    window._materialNameSaveTimers[key] = setTimeout(run, 450);
+  }
+}
+
+function salvarNomeMaterialPopup(tid, sid, materialId, inputOverride = null) {
+  const ctx = materialOwnerContext(tid, sid);
+  const index = ctx ? materialIndexById(ctx.owner, materialId) : -1;
+  const row = document.querySelector(`#modalMateriaisItem .materials-modal-item[data-material-id="${encodeURIComponent(String(materialId || ''))}"]`);
+  const input = inputOverride || (row ? row.querySelector('.materials-modal-name') : null);
+  if (!ctx || index < 0 || !input) return;
+  const novo = input.value.trim();
+  const cad = ctx.owner.cadernos[index];
+  if (!novo) {
+    input.value = materialDisplayName(cad);
+    return;
+  }
+  if (String(cad.nome || '') === novo) return;
+
+  cad.nome = novo;
+  ctx.save(ctx.owner);
+  ctx.refresh();
+}
+
+async function deletarMaterialPopup(tid, sid, materialId) {
+  const ctx = materialOwnerContext(tid, sid);
+  const index = ctx ? materialIndexById(ctx.owner, materialId) : -1;
+  if (!ctx || index < 0) return;
+  if (!(await CT.confirm('Remover este material?', { title: 'Remover material', confirmLabel: 'Remover' }))) return;
+
+  ctx.owner.cadernos.splice(index, 1);
+  ctx.save(ctx.owner);
+  ctx.refresh();
+  abrirMateriaisDoItem(tid || '', sid || '', window._materialPopupFilter || 'TODOS');
+}
+
+function abrirEditarMaterialPopup(tid, sid, materialId) {
+  const ctx = materialOwnerContext(tid, sid);
+  const index = ctx ? materialIndexById(ctx.owner, materialId) : -1;
+  if (!ctx || index < 0) return;
+  const cad = ctx.owner.cadernos[index];
+  const old = document.getElementById('modalEditarMaterial');
+  if (old) old.remove();
+
+  const rotuloAtual = materialRotulo(cad);
+  const options = CADERNO_TIPOS.map(tipo =>
+    `<option value="${tipo.rotulo}" ${tipo.rotulo === rotuloAtual ? 'selected' : ''}>${escapeHtml(tipo.label || materialTypeLabel(tipo.rotulo))}</option>`
+  ).join('');
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modalEditarMaterial';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.74);z-index:10020;display:flex;align-items:center;justify-content:center;padding:18px';
+  overlay.innerHTML = `<div style="width:460px;max-width:92vw;background:var(--bg2);border:1px solid var(--border2);border-radius:16px;padding:24px;box-shadow:0 26px 70px rgba(0,0,0,0.58)" onclick="event.stopPropagation()">
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:16px">
+      <div>
+        <div style="font-size:17px;font-weight:800;color:var(--text);margin-bottom:4px">Editar material</div>
+        <div style="font-size:12px;color:var(--text3)">Altere o tipo, nome ou link deste material.</div>
+      </div>
+      <button type="button" onclick="document.getElementById('modalEditarMaterial')?.remove()" style="width:32px;height:32px;border-radius:9px;border:1px solid var(--border);background:transparent;color:var(--text3);font-size:16px;cursor:pointer">×</button>
+    </div>
+    <div class="material-edit-field">
+      <label for="editMaterialTipo">Tipo</label>
+      <select id="editMaterialTipo" onchange="document.getElementById('editMaterialNotaBtn').style.display = this.value === 'NOTA' ? 'inline-block' : 'none'">${options}</select>
+    </div>
+    <div class="material-edit-field">
+      <label for="editMaterialNome">Nome</label>
+      <input id="editMaterialNome" type="text" value="${escapeHtml(materialDisplayName(cad))}">
+    </div>
+    <div class="material-edit-field">
+      <label for="editMaterialLink">Link</label>
+      <input id="editMaterialLink" type="text" value="${escapeHtml(cad.url || '')}">
+      <button type="button" id="editMaterialNotaBtn" onclick="buscarNotaVault('editMaterialLink')" style="display:${rotuloAtual === 'NOTA' ? 'inline-block' : 'none'};margin-top:8px;padding:8px 12px;border:1px dashed var(--accent);border-radius:8px;background:transparent;color:var(--accent);font-family:var(--sans);font-size:12px;cursor:pointer">🔍 Buscar nota do vault</button>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end;margin-top:18px">
+      <button type="button" onclick="document.getElementById('modalEditarMaterial')?.remove()" style="padding:10px 16px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text3);font-family:var(--sans);font-size:13px;cursor:pointer">Cancelar</button>
+      <button type="button" onclick="salvarEdicaoMaterialPopup('${escapeHtml(String(tid || ''))}','${escapeHtml(String(sid || ''))}',decodeURIComponent('${encodeURIComponent(String(materialId || ''))}'))" style="padding:10px 18px;border:0;border-radius:8px;background:linear-gradient(135deg,var(--accent),var(--accent2));color:#fff;font-family:var(--sans);font-size:13px;font-weight:800;cursor:pointer">Salvar alterações</button>
+    </div>
+  </div>`;
+  overlay.addEventListener('click', event => { if (event.target === overlay) overlay.remove(); });
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('editMaterialNome')?.focus(), 30);
+}
+
+function normalizarUrlMaterialInput(url) {
+  let normalized = String(url || '').trim().replace(/^["']+|["']+$/g, '');
+  if (/^[a-zA-Z]:[\\/]/.test(normalized)) {
+    normalized = 'file:///' + normalized.replace(/\\/g, '/');
+  }
+  return normalized;
+}
+
+function salvarEdicaoMaterialPopup(tid, sid, materialId) {
+  const ctx = materialOwnerContext(tid, sid);
+  const index = ctx ? materialIndexById(ctx.owner, materialId) : -1;
+  if (!ctx || index < 0) return;
+
+  const rotulo = String(document.getElementById('editMaterialTipo')?.value || '').trim().toUpperCase();
+  const tipo = CADERNO_TIPOS.find(item => item.rotulo === rotulo) || CADERNO_TIPOS[0];
+  const nome = String(document.getElementById('editMaterialNome')?.value || '').trim() || tipo.nome;
+  const linkInput = document.getElementById('editMaterialLink');
+  let url = normalizarUrlMaterialInput(linkInput?.value || '');
+  if (!url || url === 'https://') {
+    if (linkInput) linkInput.style.borderColor = 'var(--red)';
+    return;
+  }
+
+  const info = (tipo.rotulo === 'NOTA' || ehLinkWiki(url))
+    ? { ok: true, url } // [ADIÇÃO OODEUS] caminho/wikilink da nota não é URL externa
+    : (CT._safeMaterialUrlInfo
+        ? CT._safeMaterialUrlInfo(url, { allowInternalFlash: tipo.rotulo === 'FLASH' })
+        : { ok: true, url });
+  if (!info.ok) {
+    if (linkInput) linkInput.style.borderColor = 'var(--red)';
+    alert('Link bloqueado por seguranca:\n' + (info.reason || 'URL inválida.'));
+    return;
+  }
+
+  const cad = ctx.owner.cadernos[index];
+  cad.rotulo = tipo.rotulo;
+  cad.nome = nome;
+  cad.url = info.url;
+  cad.emoji = tipo.emoji;
+  if (tipo.rotulo === 'VIDEO') {
+    cad.assistido = !!(cad.assistido || cad.estudado);
+    cad.assistidoEm = cad.assistido ? (cad.assistidoEm || cad.estudadoEm || (CT._today ? CT._today() : null)) : null;
+  } else {
+    delete cad.assistido;
+    delete cad.assistidoEm;
+  }
+
+  ctx.save(ctx.owner);
+  ctx.refresh();
+  document.getElementById('modalEditarMaterial')?.remove();
+  abrirMateriaisDoItem(tid || '', sid || '', window._materialPopupFilter || 'TODOS');
+}
+
+function adicionarMaterialPopup(tid, sid) {
+  document.getElementById('modalMateriaisItem')?.remove();
+  abrirModalCaderno(tid || null, sid || null, !tid && !sid);
+  _modalReturnMaterials = { tid: tid || '', sid: sid || '' };
+}
+
+function toggleMaterialEstudadoPorId(tid, sid, materialId, manterModal = false) {
+  const ctx = materialOwnerContext(tid, sid);
+  const index = ctx ? materialIndexById(ctx.owner, materialId) : -1;
+  if (!ctx || index < 0) return;
+  toggleMaterialEstudado(tid, sid, index, manterModal);
+}
+
+function materialDragStart(event) {
+  if (event.target && event.target.closest('input,button,select,textarea')) {
+    event.preventDefault();
+    return;
+  }
+  clearMaterialDragVisualState();
+  const item = event.currentTarget;
+  item.classList.add('dragging');
+  event.dataTransfer.effectAllowed = 'move';
+  event.dataTransfer.setData('text/plain', item.dataset.materialId || '');
+}
+
+function materialDragOver(event) {
+  event.preventDefault();
+  const target = event.currentTarget;
+  const dragging = document.querySelector('#modalMateriaisItem .materials-modal-item.dragging');
+  if (!dragging || dragging === target) return;
+
+  document.querySelectorAll('#modalMateriaisItem .materials-modal-item.drag-over').forEach(item => {
+    if (item !== target) item.classList.remove('drag-over');
+  });
+  target.classList.add('drag-over');
+  const list = target.parentElement;
+  const rect = target.getBoundingClientRect();
+  const after = event.clientY > rect.top + rect.height / 2;
+  if (after) {
+    list.insertBefore(dragging, target.nextSibling);
+  } else {
+    list.insertBefore(dragging, target);
+  }
+  scheduleMaterialOrderSync(dragging.dataset.tid || '', dragging.dataset.sid || '');
+}
+
+function materialDragLeave(event) {
+  event.currentTarget.classList.remove('drag-over');
+}
+
+function materialDrop(event) {
+  event.preventDefault();
+  const dragging = document.querySelector('#modalMateriaisItem .materials-modal-item.dragging');
+  const tid = dragging ? dragging.dataset.tid || '' : event.currentTarget.dataset.tid || '';
+  const sid = dragging ? dragging.dataset.sid || '' : event.currentTarget.dataset.sid || '';
+  syncMaterialOrderFromDom(tid, sid);
+  clearMaterialDragVisualState();
+}
+
+function materialDragEnd(event) {
+  clearMaterialDragVisualState();
+  const tid = event.currentTarget.dataset.tid || '';
+  const sid = event.currentTarget.dataset.sid || '';
+  syncMaterialOrderFromDom(tid, sid);
+  const ctx = materialOwnerContext(decodeURIComponent(tid || ''), decodeURIComponent(sid || ''));
+  if (ctx) ctx.refresh();
+}
+
+function clearMaterialDragVisualState() {
+  document.querySelectorAll('#modalMateriaisItem .materials-modal-item.dragging, #modalMateriaisItem .materials-modal-item.drag-over').forEach(item => {
+    item.classList.remove('dragging', 'drag-over');
+  });
+}
+
+function scheduleMaterialOrderSync(tid, sid) {
+  if (window._materialDragSyncFrame) cancelAnimationFrame(window._materialDragSyncFrame);
+  window._materialDragSyncFrame = requestAnimationFrame(() => {
+    window._materialDragSyncFrame = null;
+    syncMaterialOrderFromDom(tid, sid);
+  });
+}
+
+function syncMaterialOrderFromDom(tidEncoded, sidEncoded) {
+  const tid = decodeURIComponent(tidEncoded || '');
+  const sid = decodeURIComponent(sidEncoded || '');
+  const ctx = materialOwnerContext(tid, sid);
+  if (!ctx || !Array.isArray(ctx.owner.cadernos)) return;
+  ensureMaterialIds(ctx);
+
+  const listEl = document.querySelector('#modalMateriaisItem .materials-modal-list');
+  if (!listEl) return;
+  const orderedIds = Array.from(listEl.querySelectorAll('.materials-modal-item'))
+    .map(item => decodeURIComponent(item.dataset.materialId || ''))
+    .filter(Boolean);
+  if (orderedIds.length < 2) return;
+
+  const byId = new Map(ctx.owner.cadernos.map(cad => [String(cad && cad.id || ''), cad]));
+  const visibleSet = new Set(orderedIds);
+  const activeFilter = window._materialPopupFilter || 'TODOS';
+  let next;
+  if (activeFilter === 'TODOS') {
+    next = orderedIds.map(id => byId.get(id)).filter(Boolean);
+    ctx.owner.cadernos.forEach(cad => {
+      if (!visibleSet.has(String(cad && cad.id || ''))) next.push(cad);
+    });
+  } else {
+    const queue = orderedIds.map(id => byId.get(id)).filter(Boolean);
+    next = ctx.owner.cadernos.map(cad => visibleSet.has(String(cad && cad.id || '')) ? (queue.shift() || cad) : cad);
+  }
+
+  ctx.owner.cadernos = next;
+  ctx.save(ctx.owner);
+}
+
+function toggleMaterialEstudado(tid, sid, idx, manterModal = false) {
+  const index = Number(idx);
+  let owner = null;
+  let save = null;
+  let refresh = renderTopicos;
+
+  if (tid) {
+    owner = CT.getTopico(tid);
+    save = obj => CT.saveTopico(obj);
+  } else if (sid) {
+    owner = CT.getSubtopicos().find(x => x.id === sid);
+    save = obj => CT.saveSubtopico(obj);
+  } else {
+    owner = CT.getMateria(mId);
+    save = obj => { CT.saveMateria(obj); materia = obj; };
+    refresh = renderCadernos;
+  }
+
+  if (!owner || !Array.isArray(owner.cadernos) || !owner.cadernos[index]) return;
+
+  const cad = owner.cadernos[index];
+  const next = !materialIsStudied(cad);
+  const today = next && CT._today ? CT._today() : null;
+
+  cad.estudado = next;
+  cad.estudadoEm = next ? today : null;
+  if (materialRotulo(cad) === 'VIDEO') {
+    cad.assistido = next;
+    cad.assistidoEm = next ? today : null;
+  }
+
+  save(owner);
+  refresh();
+  if (manterModal) abrirMateriaisDoItem(tid || '', sid || '', window._materialPopupFilter || 'TODOS');
+}
+
+async function abrirCaderno(event, url, rotulo) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  const tipo = String(rotulo || '').trim().toUpperCase();
+  // [ADIÇÃO OODEUS/R24] NOTA e wikilink [[...]] abrem internamente no Obsidian
+  // (workspace.openLinkText via host) — antes da checagem de URL externa.
+  if (tipo === 'NOTA' || ehLinkWiki(url)) {
+    const h = window.__CT_HOST__;
+    if (h && typeof h.openVaultNote === 'function') {
+      h.openVaultNote(tipo === 'NOTA' ? String(url || '').trim() : notaDeLinkWiki(url));
+    } else {
+      alert('Abrir notas do vault requer o host do plugin Track do Oodeus.');
+    }
+    return;
+  }
+  const info = CT._safeMaterialUrlInfo
+    ? CT._safeMaterialUrlInfo(url, { allowInternalFlash: tipo === 'FLASH' })
+    : { ok: true, url };
+  if (!info.ok) {
+    alert('Link bloqueado por segurança:\n' + (info.reason || 'URL inválida.'));
+    return;
+  }
+  if (tipo === 'FLASH' && info.internal) {
+    goPage(info.url);
+  } else {
+    window.open(info.url, '_blank', 'noopener');
+  }
+}
+
+// ── TÓPICO ────────────────────────────────
+async function deletarTopico(tid) {
+  const t = CT.getTopico(tid);
+  if (!t || !(await CT.confirm(`Excluir o tópico "${t.nome}"?\nSubtópicos e questões vinculadas também serão removidos.`, { title: 'Excluir tópico', confirmLabel: 'Excluir' }))) return;
+  localStorage.setItem('ct_topicos', JSON.stringify(CT.getTopicos().filter(x => x.id !== tid)));
+  localStorage.setItem('ct_subtopicos', JSON.stringify(CT.getSubtopicos().filter(x => x.topicoId !== tid)));
+  localStorage.setItem('ct_questoes', JSON.stringify(CT.getQuestoes().filter(x => x.topicoId !== tid)));
+  localStorage.setItem('ct_revisoes', JSON.stringify(CT.getRevisoes().filter(x => {
+    const ctx = CT.getContextoRevisao(x);
+    return ctx.topicoId !== tid;
+  })));
+  renderTopicos(); updateProgresso();
+}
+
+async function adicionarTopico() {
+  // [R16] prompt() nativo → CT.prompt modal (Electron lança "prompt() is not
+  // supported."; ver src/data.js.showPrompt). Síncrono → async: o onclick
+  // inline descarta a Promise, como no bloqueio do original.
+  const nome = await CT.prompt('Nome do tópico:', '');
+  if (!nome?.trim()) return;
+  CT.saveTopico({ materiaId: mId, concursoId: cId, nome: nome.trim(), estudado: false });
+  renderTopicos(); updateProgresso();
+}
+
+function adicionarSubtopico(tid) {
+  const btn = document.querySelector(`#tc_${tid} .add-sub-btn`);
+  if (!btn || btn.previousElementSibling?.classList.contains('add-sub-inline')) return;
+  const div = document.createElement('div');
+  div.className = 'add-sub-inline';
+  div.style.cssText = 'display:flex;align-items:center;gap:8px;margin:6px 0';
+  div.innerHTML = `<input type="text" placeholder="Nome do subtópico..." 
+    style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:6px;padding:6px 10px;color:var(--text);font-family:var(--sans);font-size:12px;outline:none"
+    onkeydown="if(event.key==='Enter'){confirmarSubtopico('${tid}',this.value);this.parentElement.remove()}if(event.key==='Escape')this.parentElement.remove()">
+    <button onclick="confirmarSubtopico('${tid}',this.previousElementSibling.value);this.parentElement.remove()"
+      style="padding:5px 12px;background:var(--accent);border:none;border-radius:6px;color:#fff;font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer">✓</button>
+    <button onclick="this.parentElement.remove()"
+      style="padding:5px 10px;background:transparent;border:1px solid var(--border);border-radius:6px;color:var(--text3);font-family:var(--sans);font-size:12px;cursor:pointer">✕</button>`;
+  btn.parentElement.insertBefore(div, btn);
+  div.querySelector('input').focus();
+}
+
+function confirmarSubtopico(tid, nome) {
+  if (!nome?.trim()) return;
+  CT.saveSubtopico({ topicoId: tid, materiaId: mId, concursoId: cId, nome: nome.trim(), estudado: false });
+  renderTopicos();
+  setTimeout(() => { document.getElementById('tc_' + tid)?.classList.add('open'); }, 50);
+}
+
+async function deletarSubtopico(sid) {
+  const s = CT.getSubtopicos().find(x => x.id === sid);
+  if (!s || !(await CT.confirm(`Excluir o subtópico "${s.nome}"?`, { title: 'Excluir subtópico', confirmLabel: 'Excluir' }))) return;
+  localStorage.setItem('ct_subtopicos', JSON.stringify(CT.getSubtopicos().filter(x => x.id !== sid)));
+  localStorage.setItem('ct_questoes', JSON.stringify(CT.getQuestoes().filter(x => x.subtopId !== sid)));
+  localStorage.setItem('ct_revisoes', JSON.stringify(CT.getRevisoes().filter(x => !CT.revisaoPertenceAoSubtopico(x, sid))));
+  renderTopicos(); updateProgresso();
+}
+
+// ── UI / ACCORDION ────────────────────────
+function toggleTopico(id) {
+  const target = document.getElementById(id); if (!target) return;
+  const wasOpen = target.classList.contains('open');
+  document.querySelectorAll('.topico-card.open').forEach(c => {
+    c.classList.remove('open');
+    c.classList.remove('sub-open');
+    c.querySelectorAll('.subtopico-row').forEach(r => {
+      const body = r.querySelector('.sub-body');
+      const arrow = r.querySelector('.sub-expand');
+      if (body) body.style.display = 'none';
+      if (arrow) arrow.style.transform = '';
+    });
+  });
+  if (!wasOpen) target.classList.add('open');
+}
+
+function toggleSub(id) {
+  const row = document.getElementById(id); if (!row) return;
+  const body = row.querySelector('.sub-body');
+  const arrow = row.querySelector('.sub-expand'); if (!body) return;
+  const wasOpen = body.style.display !== 'none';
+  
+  document.querySelectorAll('.topico-card.sub-open').forEach(c => c.classList.remove('sub-open'));
+  document.querySelectorAll('.subtopico-row').forEach(r => {
+    const ob = r.querySelector('.sub-body'); const oa = r.querySelector('.sub-expand');
+    if (ob) ob.style.display = 'none';
+    if (oa) oa.style.transform = '';
+  });
+  
+  if (!wasOpen) {
+    body.style.display = '';
+    if (arrow) arrow.style.transform = 'rotate(90deg)';
+    const parentCard = row.closest('.topico-card');
+    if (parentCard) parentCard.classList.add('sub-open');
+  }
+}
+
+// ── POPUP REVISÃO ─────────────────────────
+function closePopup() { const el = document.getElementById('popup-overlay'); if (el) el.classList.remove('visible'); }
+function closePopupOutside(e) { if (e.target.id === 'popup-overlay') closePopup(); }
+function selectOpt(el) { document.querySelectorAll('.popup-opt').forEach(o => o.classList.remove('selected')); el.classList.add('selected'); }
+
+function getAlvoRevisaoManual(tid, sid) {
+  if (sid) {
+    const sub = CT.getSubtopico ? CT.getSubtopico(sid) : CT.getSubtopicos().find(s => s.id === sid);
+    const top = sub ? CT.getTopico(sub.topicoId) : null;
+    return {
+      alvoId: sid,
+      nome: sub?.nome || 'Subtópico',
+      topico: top,
+      subtopico: sub
+    };
+  }
+  const top = tid ? CT.getTopico(tid) : null;
+  return {
+    alvoId: tid,
+    nome: top?.nome || 'Tópico',
+    topico: top,
+    subtopico: null
+  };
+}
+
+function fecharPopupMarcarRevisao() {
+  document.getElementById('modalManualReview')?.remove();
+  manualRevTopicoId = null;
+  manualRevSubId = null;
+}
+
+function selectManualReviewOpt(el) {
+  document.querySelectorAll('#modalManualReview .popup-opt').forEach(o => o.classList.remove('selected'));
+  el.classList.add('selected');
+  const input = document.getElementById('manualReviewDate');
+  if (input) input.value = '';
+}
+
+function abrirPopupMarcarRevisao(tid, sid) {
+  const alvo = getAlvoRevisaoManual(tid, sid);
+  if (!alvo.alvoId) return;
+  manualRevTopicoId = tid || alvo.topico?.id || '';
+  manualRevSubId = sid || '';
+  document.getElementById('modalManualReview')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'modalManualReview';
+  overlay.className = 'popup-overlay visible';
+  overlay.onclick = e => { if (e.target === overlay) fecharPopupMarcarRevisao(); };
+  overlay.innerHTML = `
+    <div class="popup">
+      <div class="popup-icon">🗓️</div>
+      <div class="popup-title">Marcar Revisão</div>
+      <div class="popup-topico">${escapeHtml(alvo.nome)}</div>
+      <div class="popup-tip">
+        Escolha uma data para revisar este ${manualRevSubId ? 'subtópico' : 'tópico'}. Isso não marca o item como estudado.
+      </div>
+      <div class="popup-opts">
+        <div class="popup-opt selected" onclick="selectManualReviewOpt(this)">
+          <div class="popup-opt-num">5</div>
+          <div class="popup-opt-label">dias</div>
+        </div>
+        <div class="popup-opt" onclick="selectManualReviewOpt(this)">
+          <div class="popup-opt-num">7</div>
+          <div class="popup-opt-label">dias</div>
+        </div>
+        <div class="popup-opt" onclick="selectManualReviewOpt(this)">
+          <div class="popup-opt-num">15</div>
+          <div class="popup-opt-label">dias</div>
+        </div>
+        <div class="popup-opt" onclick="selectManualReviewOpt(this)">
+          <div class="popup-opt-num">30</div>
+          <div class="popup-opt-label">dias</div>
+        </div>
+      </div>
+      <label class="manual-review-date-label" for="manualReviewDate">Ou escolha uma data exata</label>
+      <div class="popup-custom">
+        <input id="manualReviewDate" type="date" min="${CT._today()}" oninput="document.querySelectorAll('#modalManualReview .popup-opt').forEach(o=>o.classList.remove('selected'))">
+      </div>
+      <div class="popup-btns">
+        <button class="popup-btn-skip" type="button" onclick="fecharPopupMarcarRevisao()">Cancelar</button>
+        <button class="popup-btn-ok" type="button" onclick="salvarRevisaoManual()">✓ Agendar revisão</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+}
+
+function salvarRevisaoManual() {
+  const alvo = getAlvoRevisaoManual(manualRevTopicoId, manualRevSubId);
+  if (!alvo.alvoId) return;
+  const inputData = document.getElementById('manualReviewDate')?.value || '';
+  const opt = document.querySelector('#modalManualReview .popup-opt.selected .popup-opt-num');
+  let dataRevisao = inputData;
+  if (!dataRevisao && opt) {
+    const d = new Date();
+    d.setHours(12, 0, 0, 0);
+    d.setDate(d.getDate() + parseInt(opt.textContent, 10));
+    dataRevisao = CT._dateString(d);
+  }
+  if (!dataRevisao) {
+    alert('Escolha uma data para a revisão.');
+    return;
+  }
+
+  CT.agendarRevisao(alvo.alvoId, dataRevisao);
+  if (alvo.subtopico) {
+    alvo.subtopico.revisaoData = dataRevisao;
+    CT.saveSubtopico(alvo.subtopico);
+  } else if (alvo.topico) {
+    alvo.topico.revisaoData = dataRevisao;
+    CT.saveTopico(alvo.topico);
+  }
+  fecharPopupMarcarRevisao();
+  renderTopicos();
+  updateProgresso();
+  if (CT.toast) CT.toast('Revisão marcada para ' + fmtDate(dataRevisao), '🗓️');
+}
+
+// ── SMART LINK ───────────────────────────
+function abrirModalLink(targetId, name, type) {
+  const matches = CT.findMatches(name, cId, type);
+  const old = document.getElementById('modalSmartLink');
+  if (old) old.remove();
+  if (!matches.length) {
+    alert('Nenhum material encontrado em outros concursos para este termo.');
+    return;
+  }
+  const overlay = document.createElement('div');
+  overlay.id = 'modalSmartLink';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);backdrop-filter:blur(4px);z-index:10000;display:flex;align-items:center;justify-content:center';
+  
+  let listHtml = matches.map(m => {
+    const c = CT.getConcursos().find(x => x.id === m.concursoId);
+    const logo = c?.logoPath ? `<img src="${c.logoPath}" style="width:20px;height:20px;border-radius:3px">` : '🏛️';
+    return `<div class="match-item" style="display:flex;align-items:center;gap:12px;background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:8px">
+      <div style="flex:1">
+        <div style="font-size:10px;color:var(--yellow);font-weight:700;margin-bottom:2px;display:flex;align-items:center;gap:5px">${logo} ${m.contestName}</div>
+        <div style="font-size:13px;font-weight:600;color:var(--text)">${m.nome}</div>
+        <div style="font-size:11px;color:var(--text3);margin-top:4px">${m.cadernos?.length || 0} materiais${m.flashcardsCount ? ' - ' + m.flashcardsCount + ' flashcards' : ''}</div>
+      </div>
+      <button onclick="confirmarImportacao('${targetId}', '${m.id}', '${type}')" style="padding:8px 14px;background:var(--yellow);border:none;border-radius:8px;color:#000;font-size:11px;font-weight:700;cursor:pointer">📥 Importar</button>
+    </div>`;
+  }).join('');
+
+  overlay.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:20px;padding:28px;width:460px;max-width:92vw;box-shadow:0 30px 70px rgba(0,0,0,0.7)">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+      <div style="font-size:18px;font-weight:800">🔗 Smart Link</div>
+      <button onclick="document.getElementById('modalSmartLink').remove()" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px">✕</button>
+    </div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:16px">Encontramos estes tópicos semelhantes em outros concursos:</div>
+    <div style="max-height:350px;overflow-y:auto;margin-bottom:20px;padding-right:5px">${listHtml}</div>
+    <button onclick="document.getElementById('modalSmartLink').remove()" style="width:100%;padding:12px;background:var(--bg3);border:1px solid var(--border);border-radius:12px;color:var(--text2);cursor:pointer;font-weight:600">Fechar</button>
+  </div>`;
+
+  overlay.onclick = e => { if(e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+async function confirmarImportacao(targetId, sourceId, type) {
+  if (!(await CT.confirm('Deseja importar todos os materiais deste tópico?', { title: 'Importar materiais', confirmLabel: 'Importar', danger: false }))) return;
+  const res = CT.importMaterials(targetId, sourceId, type);
+  document.getElementById('modalSmartLink')?.remove();
+  renderTopicos();
+  if (res && res.flashcardsCopiados) {
+    alert(res.flashcardsCopiados + ' flashcard(s) também foram trazidos para este concurso.');
+  }
+}
+
+// ── CADERNOS ──────────────────────────────
+function abrirOpcoes(tid, sid) {
+  const isTop = !!tid;
+  const obj = isTop ? CT.getTopico(tid) : CT.getSubtopicos().find(x=>x.id===sid);
+  if (!obj) return;
+  const old = document.getElementById('modalOpcoes'); if (old) old.remove();
+  
+  const overlay = document.createElement('div');
+  overlay.id = 'modalOpcoes';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center';
+
+  overlay.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:16px;padding:24px;width:440px;max-width:92vw;box-shadow:0 30px 60px rgba(0,0,0,0.5);max-height:90vh;display:flex;flex-direction:column">
+    <div style="display:flex;justify-content:space-between;margin-bottom:16px;flex-shrink:0"><div style="font-weight:700;font-size:16px">${isTop ? 'Configurações do Tópico' : 'Configurações do Subtópico'}</div><button onclick="document.getElementById('modalOpcoes').remove()" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px">✕</button></div>
+    
+    <div style="overflow-y:auto;flex:1;padding-right:4px;">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">Renomear</div>
+      <div style="display:flex;gap:8px;margin-bottom:20px">
+        <input type="text" id="opcoesNomeInput" value="${obj.nome.replace(/"/g, '&quot;')}" style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:8px 12px;color:var(--text);font-family:var(--sans);font-size:13px;outline:none" onkeydown="if(event.key==='Enter') salvarNovoNomeOpcoes('${tid||''}','${sid||''}', document.getElementById('btnSalvarOpcoesNome'))">
+        <button id="btnSalvarOpcoesNome" onclick="salvarNovoNomeOpcoes('${tid||''}','${sid||''}', this)" style="padding:8px 14px;background:var(--accent);border:none;border-radius:8px;color:#fff;font-weight:600;cursor:pointer;font-size:12px;transition:all 0.15s">Salvar</button>
+      </div>
+
+    </div>
+
+    <div style="border-top:1px solid var(--border);padding-top:16px;flex-shrink:0;">
+      <button onclick="document.getElementById('modalOpcoes').remove();${isTop ? `deletarTopico('${tid}')` : `deletarSubtopico('${sid}')`}" style="width:100%;padding:14px;background:var(--red);border:1px solid var(--red);border-radius:8px;color:#fff;font-weight:800;cursor:pointer;font-size:14px;text-transform:uppercase;letter-spacing:1px;box-shadow:0 4px 12px rgba(245,90,90,0.4);transition:all 0.15s" onmouseover="this.style.transform='scale(1.02)'" onmouseout="this.style.transform='scale(1)'">${isTop ? '✕ DELETAR TUDO' : '✕ EXCLUIR SUBTÓPICO'}</button>
+    </div>
+  </div>`;
+  
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+function salvarNovoNomeOpcoes(tid, sid, btn) {
+  const inputE = document.getElementById('opcoesNomeInput');
+  if(!inputE) return;
+  const novo = inputE.value.trim();
+  if (!novo) return;
+  if (tid) {
+    const t = CT.getTopico(tid);
+    if (t) { t.nome = novo; CT.saveTopico(t); }
+  } else if (sid) {
+    const s = CT.getSubtopicos().find(x=>x.id===sid);
+    if (s) { s.nome = novo; CT.saveSubtopico(s); }
+  }
+  if (btn) {
+    const orig = btn.textContent;
+    btn.textContent = '✓';
+    btn.style.backgroundColor = 'var(--green)';
+    setTimeout(() => { btn.textContent = orig; btn.style.backgroundColor = 'var(--accent)'; }, 1000);
+  }
+  renderTopicos();
+}
+
+function salvarNomeCaderno(tid, sid, idx, input) {
+  if (!input) return;
+  const novo = input.value.trim();
+  if (!novo) return;
+  const isTop = !!tid;
+  const obj = isTop ? CT.getTopico(tid) : CT.getSubtopicos().find(x=>x.id===sid);
+  if (!obj || !obj.cadernos || !obj.cadernos[idx]) return;
+  
+  obj.cadernos[idx].nome = novo;
+  if (isTop) CT.saveTopico(obj);
+  else CT.saveSubtopico(obj);
+  
+  // Feedback visual
+  input.style.borderColor = 'var(--green)';
+  setTimeout(() => { if(input) input.style.borderColor = 'var(--border2)'; }, 1000);
+  renderTopicos();
+}
+
+function salvarNovoNomeSubOpcoes(sid, btn) {
+  const inputE = document.getElementById('subNomeInput_' + sid);
+  if (!inputE) return;
+  const novo = inputE.value.trim();
+  if (!novo) return;
+  const s = CT.getSubtopicos().find(x=>x.id===sid);
+  if (s) { s.nome = novo; CT.saveSubtopico(s); }
+  renderTopicos();
+  if (btn) {
+    const orig = btn.textContent;
+    btn.textContent = '✓';
+    btn.style.backgroundColor = 'var(--green)';
+    setTimeout(() => { btn.textContent = orig; btn.style.backgroundColor = 'var(--accent)'; }, 1000);
+  }
+}
+
+async function deletarSubtopicoDeOpcoes(sid, tid) {
+  const s = CT.getSubtopicos().find(x => x.id === sid);
+  if (!s || !(await CT.confirm(`Excluir o subtópico "${s.nome}"?`, { title: 'Excluir subtópico', confirmLabel: 'Excluir' }))) return;
+  localStorage.setItem('ct_subtopicos', JSON.stringify(CT.getSubtopicos().filter(x => x.id !== sid)));
+  localStorage.setItem('ct_questoes', JSON.stringify(CT.getQuestoes().filter(x => x.subtopId !== sid)));
+  renderTopicos();
+  document.getElementById('modalOpcoes').remove();
+  abrirOpcoes(tid, null);
+}
+
+function deletarCadernoTopicoModal(tid, sid, idx) {
+  if (tid) { const t = CT.getTopico(tid); if(t&&t.cadernos){t.cadernos.splice(idx,1);CT.saveTopico(t);} }
+  else if (sid) { const s = CT.getSubtopicos().find(x=>x.id===sid); if(s&&s.cadernos){s.cadernos.splice(idx,1);CT.saveSubtopico(s);} }
+  renderTopicos(); document.getElementById('modalOpcoes')?.remove();
+  const obj = tid ? CT.getTopico(tid) : CT.getSubtopicos().find(x=>x.id===sid);
+  if (obj?.cadernos?.length) abrirOpcoes(tid||null, sid||null);
+}
+
+function abrirAddHorasSub(sid, tid) { const p = document.getElementById('addHorasSub_' + sid); if (p) p.style.display = p.style.display === 'none' ? '' : 'none'; }
+function salvarHorasSub(sid, tid) {
+  const h = parseInt(document.getElementById('addHSub_' + sid)?.value) || 0, m = parseInt(document.getElementById('addMSub_' + sid)?.value) || 0;
+  if (h+m <= 0) return;
+  CT.registrarSessao({ concursoId: cId, materiaId: mId, topicoId: tid, subtopId: sid, duracaoSegundos: h*3600 + m*60 });
+  document.getElementById('addHorasSub_' + sid).style.display = 'none'; updateProgresso(); renderTopicos();
+}
+
+function ensureAjusteHistoryHost() {
+  document.querySelectorAll('.adj-history-list').forEach(el => {
+    const modal = el.closest('#modal-ajuste-materia');
+    if (!modal) {
+      const wrap = el.closest('.adj-history-box');
+      const toggle = wrap && wrap.nextElementSibling && wrap.nextElementSibling.classList.contains('adj-history-toggle')
+        ? wrap.nextElementSibling
+        : null;
+      if (toggle) toggle.remove();
+      if (wrap) wrap.remove();
+      else {
+        const tip = el.previousElementSibling;
+        const label = tip && tip.classList.contains('adj-history-tip') ? tip.previousElementSibling : null;
+        if (label && label.classList.contains('section-label')) label.remove();
+        if (tip && tip.classList.contains('adj-history-tip')) tip.remove();
+        el.remove();
+      }
+    }
+  });
+
+  const modal = document.getElementById('modal-ajuste-materia');
+  if (!modal) return null;
+  const box = modal.querySelector('.popup');
+  if (!box) return null;
+  let list = modal.querySelector('#adj-history-list');
+  if (list) return list;
+
+  const resetBtn = box.querySelector('.btn-reset-materia');
+  const wrap = document.createElement('div');
+  wrap.className = 'adj-history-box';
+  wrap.id = 'adj-history-box';
+  const tip = document.createElement('div');
+  tip.className = 'adj-history-tip';
+  tip.textContent = 'Audite tudo que compõe as estatísticas gerais desta matéria e exclua lançamentos equivocados sem precisar zerar tudo.';
+  list = document.createElement('div');
+  list.className = 'adj-history-list';
+  list.id = 'adj-history-list';
+  wrap.appendChild(tip);
+  wrap.appendChild(list);
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'adj-history-toggle';
+  toggle.id = 'adj-history-toggle';
+  toggle.innerHTML = `
+    <div>
+      <div class="adj-history-toggle-label">Histórico dos Lançamentos</div>
+      <div class="adj-history-toggle-meta" id="adj-history-toggle-meta">Clique para expandir</div>
+    </div>
+    <span class="adj-history-toggle-icon">▼</span>
+  `;
+  toggle.onclick = function () {
+    wrap.classList.toggle('open');
+    toggle.classList.toggle('open', wrap.classList.contains('open'));
+    updateAjusteHistoryToggle();
+  };
+
+  box.insertBefore(toggle, resetBtn);
+  box.insertBefore(wrap, resetBtn);
+  return list;
+}
+
+function updateAjusteHistoryToggle(total) {
+  const box = document.getElementById('adj-history-box');
+  const toggle = document.getElementById('adj-history-toggle');
+  const meta = document.getElementById('adj-history-toggle-meta');
+  if (!box || !toggle || !meta) return;
+  toggle.classList.toggle('open', box.classList.contains('open'));
+  const count = typeof total === 'number' ? total : document.querySelectorAll('#adj-history-list .adj-history-item').length;
+  const suffix = count === 1 ? 'registro' : 'registros';
+  meta.textContent = box.classList.contains('open')
+    ? `${count} ${suffix} • Clique para recolher`
+    : `${count} ${suffix} • Clique para expandir`;
+}
+
+function formatarDataHoraHistorico(data, horaInicio) {
+  let dt = null;
+  if (horaInicio) {
+    dt = new Date(horaInicio);
+    if (isNaN(dt.getTime())) dt = null;
+  }
+  if (!dt && data) {
+    dt = new Date(data + 'T12:00:00');
+    if (isNaN(dt.getTime())) dt = null;
+  }
+  if (!dt) return data || 'Sem data';
+  const dd = String(dt.getDate()).padStart(2, '0');
+  const mm = String(dt.getMonth() + 1).padStart(2, '0');
+  const yy = dt.getFullYear();
+  const hh = String(dt.getHours()).padStart(2, '0');
+  const mi = String(dt.getMinutes()).padStart(2, '0');
+  return `${dd}/${mm}/${yy} ${hh}:${mi}`;
+}
+
+function contextoLancamentoMateria(entry) {
+  const partes = [];
+  if (entry.topicoId) {
+    const top = CT.getTopico(entry.topicoId);
+    if (top && top.nome) partes.push(top.nome);
+  }
+  if (entry.subtopId) {
+    const sub = CT.getSubtopicos().find(s => s.id === entry.subtopId);
+    if (sub && sub.nome) partes.push(sub.nome);
+  }
+  if (!partes.length) partes.push('Lançamento avulso da matéria');
+  if (entry.nota) partes.push(entry.nota);
+  else if (entry.origem) partes.push('Origem: ' + entry.origem);
+  return partes.join(' • ');
+}
+
+function formatarDuracaoHistorico(segundos) {
+  const total = Math.abs(segundos || 0);
+  const sinal = (segundos || 0) < 0 ? '-' : '';
+  return sinal + CT.formatarTempo(total);
+}
+
+function escapeHtml(text) {
+  return (text || '').toString()
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function obterHistoricoMateria() {
+  const sessoes = CT.getSessoes({ concursoId: cId, materiaId: mId }).map(s => ({
+    id: s.id,
+    tipo: 'sessao',
+    sortKey: s.horaInicio || `${s.data || ''}T00:00:00`,
+    titulo: 'Sessão de estudo',
+    dataLabel: formatarDataHoraHistorico(s.data, s.horaInicio),
+    contexto: contextoLancamentoMateria(s),
+    valores: [
+      { label: formatarDuracaoHistorico(s.duracaoSegundos || 0), cls: '' },
+      ...(CT.formatarMetricasSessao ? CT.formatarMetricasSessao(s).map(item => ({ label: item.label, cls: '' })) : [])
+    ]
+  }));
+  const questoes = CT.getQuestoes({ materiaId: mId }).map(q => ({
+    id: q.id,
+    tipo: 'questoes',
+    sortKey: q.horaInicio || `${q.data || ''}T00:00:00`,
+    titulo: 'Lançamento de questões',
+    dataLabel: formatarDataHoraHistorico(q.data, q.horaInicio),
+    contexto: contextoLancamentoMateria(q),
+    valores: [
+      { label: `${q.resolvidas || 0} questões`, cls: '' },
+      { label: `${q.acertos || 0} acertos`, cls: 'good' },
+      { label: `${q.erros || 0} erros`, cls: 'bad' }
+    ]
+  }));
+  return sessoes.concat(questoes).sort((a, b) => String(b.sortKey).localeCompare(String(a.sortKey)));
+}
+
+function renderHistoricoAjusteMateria() {
+  const list = ensureAjusteHistoryHost();
+  if (!list) return;
+  const historico = obterHistoricoMateria();
+  if (!historico.length) {
+    list.innerHTML = '<div class="adj-history-empty">Nenhum lançamento encontrado para esta matéria ainda.</div>';
+    updateAjusteHistoryToggle(0);
+    return;
+  }
+  list.innerHTML = historico.map(item => `
+    <div class="adj-history-item">
+      <div class="adj-history-icon">${item.tipo === 'sessao' ? '⏱️' : '📝'}</div>
+      <div class="adj-history-body">
+        <div class="adj-history-head">
+          <div class="adj-history-title">${escapeHtml(item.titulo)}</div>
+          <div class="adj-history-date">${escapeHtml(item.dataLabel)}</div>
+        </div>
+        <div class="adj-history-meta">${escapeHtml(item.contexto)}</div>
+        <div class="adj-history-values">${item.valores.map(valor => `<span class="adj-history-pill${valor.cls ? ' ' + valor.cls : ''}">${escapeHtml(valor.label)}</span>`).join('')}</div>
+      </div>
+      <div class="adj-history-actions">
+        <button class="adj-history-edit" onclick="abrirEdicaoLancamentoMateria('${item.tipo}','${item.id}')">Editar</button>
+        <button class="adj-history-delete" onclick="excluirLancamentoMateria('${item.tipo}','${item.id}')">Excluir</button>
+      </div>
+    </div>
+  `).join('');
+  updateAjusteHistoryToggle(historico.length);
+}
+
+function valorInteiroNaoNegativo(id) {
+  const value = parseInt(document.getElementById(id)?.value, 10);
+  return Number.isFinite(value) && value > 0 ? value : 0;
+}
+
+function dataHoraLancamento(entry) {
+  let data = entry && entry.data ? entry.data : CT._today();
+  let hora = '12:00';
+  if (entry && entry.horaInicio) {
+    const dt = new Date(entry.horaInicio);
+    if (!isNaN(dt.getTime())) {
+      data = CT._dateString ? CT._dateString(dt) : data;
+      hora = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+    }
+  }
+  return { data, hora };
+}
+
+function comporHoraInicioLancamento(data, hora) {
+  const safeData = /^\d{4}-\d{2}-\d{2}$/.test(data || '') ? data : CT._today();
+  const safeHora = /^\d{2}:\d{2}$/.test(hora || '') ? hora : '12:00';
+  const dt = new Date(`${safeData}T${safeHora}:00`);
+  return isNaN(dt.getTime()) ? new Date().toISOString() : dt.toISOString();
+}
+
+function obterLancamentoMateria(tipo, id) {
+  if (tipo === 'sessao') return CT.getSessoes().find(s => s.id === id) || null;
+  return CT.getQuestoes().find(q => q.id === id) || null;
+}
+
+function fecharEdicaoLancamentoMateria() {
+  document.getElementById('modalEditarLancamentoMateria')?.remove();
+}
+
+function abrirEdicaoLancamentoMateria(tipo, id) {
+  const entry = obterLancamentoMateria(tipo, id);
+  if (!entry) {
+    alert('Lançamento não encontrado.');
+    return;
+  }
+  fecharEdicaoLancamentoMateria();
+  const quando = dataHoraLancamento(entry);
+  const contexto = contextoLancamentoMateria(entry);
+  const overlay = document.createElement('div');
+  overlay.id = 'modalEditarLancamentoMateria';
+  overlay.className = 'popup-overlay visible';
+  overlay.onclick = event => { if (event.target === overlay) fecharEdicaoLancamentoMateria(); };
+
+  let fields = '';
+  if (tipo === 'sessao') {
+    const segundos = Math.max(0, parseInt(entry.duracaoSegundos, 10) || 0);
+    const metricas = CT.getMetricasSessao ? CT.getMetricasSessao(entry) : { paginasPdf:0, videoMinutos:0 };
+    fields = `
+      <div class="section-label" style="margin-top:0">Tempo de Estudo</div>
+      <div class="adj-edit-grid">
+        <div class="adj-edit-field"><label>Horas</label><input id="editSessaoHoras" type="number" min="0" value="${Math.floor(segundos / 3600)}"></div>
+        <div class="adj-edit-field"><label>Minutos</label><input id="editSessaoMinutos" type="number" min="0" max="59" value="${Math.floor((segundos % 3600) / 60)}"></div>
+      </div>
+      <div class="section-label">Métricas opcionais</div>
+      <div class="adj-edit-grid">
+        <div class="adj-edit-field"><label>Páginas PDF/Livro</label><input id="editSessaoPaginas" type="number" min="0" value="${metricas.paginasPdf || 0}"></div>
+        <div class="adj-edit-field"><label>Minutos de vídeo</label><input id="editSessaoVideo" type="number" min="0" value="${metricas.videoMinutos || 0}"></div>
+      </div>
+    `;
+  } else {
+    fields = `
+      <div class="section-label" style="margin-top:0">Lançamento de Questões</div>
+      <div class="adj-edit-grid">
+        <div class="adj-edit-field"><label>Acertos</label><input id="editQuestAcertos" type="number" min="0" value="${Math.max(0, parseInt(entry.acertos, 10) || 0)}" style="color:var(--green)"></div>
+        <div class="adj-edit-field"><label>Erros</label><input id="editQuestErros" type="number" min="0" value="${Math.max(0, parseInt(entry.erros, 10) || 0)}" style="color:var(--red)"></div>
+      </div>
+    `;
+  }
+
+  overlay.innerHTML = `
+    <div class="popup adj-edit-modal">
+      <div class="popup-title">Editar ${tipo === 'sessao' ? 'sessão de estudo' : 'lançamento de questões'}</div>
+      <div class="adj-edit-context">${escapeHtml(contexto)}</div>
+      <div class="section-label">Data do lançamento</div>
+      <div class="adj-edit-grid">
+        <div class="adj-edit-field"><label>Data</label><input id="editLancData" type="date" max="${CT._today()}" value="${escapeHtml(quando.data)}"></div>
+        <div class="adj-edit-field"><label>Hora</label><input id="editLancHora" type="time" value="${escapeHtml(quando.hora)}"></div>
+      </div>
+      ${fields}
+      <div class="popup-btns">
+        <button class="popup-btn-skip" onclick="fecharEdicaoLancamentoMateria()">Cancelar</button>
+        <button class="popup-btn-ok" onclick="salvarEdicaoLancamentoMateria('${tipo}','${id}')">✓ Salvar Edição</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+}
+
+function salvarEdicaoLancamentoMateria(tipo, id) {
+  const entry = obterLancamentoMateria(tipo, id);
+  if (!entry) {
+    alert('Lançamento não encontrado.');
+    return;
+  }
+  const data = document.getElementById('editLancData')?.value || CT._today();
+  if (data > CT._today()) {
+    alert('Escolha hoje ou uma data anterior para o lançamento.');
+    return;
+  }
+  const hora = document.getElementById('editLancHora')?.value || '12:00';
+  let ok = false;
+  if (tipo === 'sessao') {
+    const horas = valorInteiroNaoNegativo('editSessaoHoras');
+    const minutos = valorInteiroNaoNegativo('editSessaoMinutos');
+    const paginasPdf = valorInteiroNaoNegativo('editSessaoPaginas');
+    const videoMinutos = valorInteiroNaoNegativo('editSessaoVideo');
+    const duracaoSegundos = (horas * 3600) + (minutos * 60);
+    if (duracaoSegundos <= 0 && paginasPdf <= 0 && videoMinutos <= 0) {
+      alert('Informe tempo de estudo ou alguma métrica para manter a sessão.');
+      return;
+    }
+    ok = CT.atualizarSessao(id, {
+      data,
+      horaInicio: comporHoraInicioLancamento(data, hora),
+      duracaoSegundos,
+      metricas: { paginasPdf, videoMinutos }
+    });
+  } else {
+    const acertos = valorInteiroNaoNegativo('editQuestAcertos');
+    const erros = valorInteiroNaoNegativo('editQuestErros');
+    if (acertos + erros <= 0) {
+      alert('Informe ao menos uma questão resolvida.');
+      return;
+    }
+    ok = CT.atualizarLancamentoQuestoes(id, {
+      data,
+      horaInicio: comporHoraInicioLancamento(data, hora),
+      acertos,
+      erros,
+      resolvidas: acertos + erros
+    });
+  }
+  if (!ok) {
+    alert('Não foi possível salvar a edição.');
+    return;
+  }
+  fecharEdicaoLancamentoMateria();
+  abrirModalAjuste();
+  updateProgresso();
+  renderTopicos();
+}
+
+async function excluirLancamentoMateria(tipo, id) {
+  if (!id) return;
+  const label = tipo === 'sessao' ? 'esta sessão de estudo' : 'este lançamento de questões';
+  if (!(await CT.confirm(`Excluir ${label} das estatísticas gerais da matéria?`, { title: 'Excluir lançamento', confirmLabel: 'Excluir' }))) return;
+  const ok = tipo === 'sessao' ? CT.excluirSessao(id) : CT.excluirLancamentoQuestoes(id);
+  if (!ok) {
+    alert('Não foi possível excluir esse lançamento.');
+    return;
+  }
+  abrirModalAjuste();
+  updateProgresso();
+  renderTopicos();
+}
+
+function abrirModalAjuste() {
+  ensureAjusteHistoryHost();
+  const sessoes = CT.getSessoes({ concursoId: cId, materiaId: mId });
+  const seg = CT.totalSegundos(sessoes);
+  
+  const questoes = CT.getQuestoes({ materiaId: mId });
+  const st = CT.calcStats(questoes);
+  
+  document.getElementById('adjH').value = Math.floor(seg / 3600);
+  document.getElementById('adjM').value = Math.floor((seg % 3600) / 60);
+  document.getElementById('adjA').value = st.acertos || 0;
+  document.getElementById('adjE').value = st.erros || 0;
+  
+  window._adjInitial = { seg, acertos: st.acertos || 0, erros: st.erros || 0 };
+  
+  document.getElementById('adj-materia-nome').textContent = materia.nome;
+  renderHistoricoAjusteMateria();
+  document.getElementById('modal-ajuste-materia').classList.add('visible');
+}
+
+function fecharModalAjuste() {
+  const el = document.getElementById('modal-ajuste-materia');
+  if (el) el.classList.remove('visible');
+}
+
+function abrirOpcoesMateria() {
+  materia = CT.getMateria(mId) || materia;
+  const cadernos = materia.cadernos || [];
+  const old = document.getElementById('modalOpcoes'); if (old) old.remove();
+  
+  const overlay = document.createElement('div');
+  overlay.id = 'modalOpcoes';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:10000;display:flex;align-items:center;justify-content:center';
+  
+  const itens = cadernos.length ? cadernos.map((cad, i) => `<div style="display:flex;align-items:center;gap:10px;padding:10px;background:var(--bg3);border:1px solid var(--border);border-radius:8px">
+      ${materialOptionIconHtml(cad)}
+      <div style="flex:1;min-width:0"><div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(materialDisplayName(cad))}</div><div style="font-size:10px;color:var(--text3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escapeHtml(cad.url)}</div></div>
+      <button onclick="deletarCadernoMateria(${i}); document.getElementById('modalOpcoes').remove(); abrirOpcoesMateria()" style="padding:6px;background:rgba(245,90,90,0.1);border:1px solid var(--red);border-radius:6px;color:var(--red);cursor:pointer">✕</button>
+    </div>`).join('') : '<div style="color:var(--text3);font-size:12px;padding:10px 0">Nenhum material associado.</div>';
+
+  overlay.innerHTML = `<div style="background:var(--bg2);border:1px solid var(--border2);border-radius:16px;padding:24px;width:400px;max-width:92vw;box-shadow:0 30px 60px rgba(0,0,0,0.5)">
+    <div style="display:flex;justify-content:space-between;margin-bottom:16px"><div style="font-weight:700;font-size:16px">Configurações da Matéria</div><button onclick="document.getElementById('modalOpcoes').remove()" style="background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px">✕</button></div>
+    
+    <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">Renomear</div>
+    <div style="display:flex;gap:8px;margin-bottom:20px">
+      <input type="text" id="opcoesNomeInput" value="${materia.nome.replace(/"/g, '&quot;')}" style="flex:1;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:8px 12px;color:var(--text);font-family:var(--sans);font-size:13px;outline:none" onkeydown="if(event.key==='Enter') salvarNovoNomeMateria()">
+      <button onclick="salvarNovoNomeMateria()" style="padding:8px 14px;background:var(--accent);border:none;border-radius:8px;color:#fff;font-weight:600;cursor:pointer;font-size:12px">Salvar</button>
+    </div>
+
+    <div style="font-size:11px;font-weight:700;color:var(--text3);margin-bottom:8px;text-transform:uppercase;letter-spacing:1px">Materiais de Estudo (Matéria)</div>
+    <div style="display:flex;flex-direction:column;gap:8px;max-height:200px;overflow-y:auto;padding-right:4px">${itens}</div>
+  </div>`;
+  
+  overlay.onclick = e => { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+}
+
+function salvarNovoNomeMateria() {
+  const inputE = document.getElementById('opcoesNomeInput');
+  if(!inputE) return;
+  const novo = inputE.value.trim();
+  if (novo && novo !== materia.nome) {
+    materia.nome = novo;
+    CT.saveMateria(materia);
+    reloadPagina();
+  } else {
+    document.getElementById('modalOpcoes').remove();
+  }
+}
+
+async function renomearTopico(tid) {
+  const t = CT.getTopico(tid);
+  if (!t) return;
+  const novo = await CT.prompt('Renomear tópico:', t.nome); // [R16] ver adicionarTopico
+  if (novo && novo.trim() && novo.trim() !== t.nome) {
+    t.nome = novo.trim();
+    CT.saveTopico(t);
+    renderTopicos();
+  }
+}
+
+async function renomearSubtopico(sid) {
+  const s = CT.getSubtopicos().find(x => x.id === sid);
+  if (!s) return;
+  const novo = await CT.prompt('Renomear subtópico:', s.nome); // [R16] ver adicionarTopico
+  if (novo && novo.trim() && novo.trim() !== s.nome) {
+    s.nome = novo.trim();
+    CT.saveSubtopico(s);
+    renderTopicos();
+  }
+}
+
+function salvarAjusteManual() {
+  const h = parseInt(document.getElementById('adjH').value) || 0, m = parseInt(document.getElementById('adjM').value) || 0;
+  const a = parseInt(document.getElementById('adjA').value) || 0, e = parseInt(document.getElementById('adjE').value) || 0;
+  const novoSeg = (h * 3600) + (m * 60), diffSeg = novoSeg - _adjInitial.seg;
+  const diffA = a - _adjInitial.acertos, diffE = e - _adjInitial.erros;
+  if (diffSeg !== 0) CT.registrarSessao({ concursoId: cId, materiaId: mId, duracaoSegundos: diffSeg, nota: 'Ajuste manual' });
+  if (diffA !== 0 || diffE !== 0) CT.lancarQuestoes({ concursoId: cId, materiaId: mId, resolvidas: diffA + diffE, acertos: diffA, erros: diffE, nota: 'Ajuste manual' });
+  fecharModalAjuste(); updateProgresso(); renderTopicos();
+}
+
+async function zerarEstatisticasMateria() {
+  const m = CT.getMateria(mId); if (!m || !(await CT.confirm(`ZERAR COMPLETAMENTE a matéria "${m.nome}"?`, { title: 'Zerar matéria', confirmLabel: 'Zerar tudo' }))) return;
+  localStorage.setItem('ct_sessoes', JSON.stringify(CT.getSessoes().filter(s => s.materiaId !== mId)));
+  localStorage.setItem('ct_questoes', JSON.stringify(CT.getQuestoes().filter(q => q.materiaId !== mId)));
+  const topicos = CT.getTopicos(); const tIds = [];
+  topicos.forEach(t => { if (t.materiaId === mId) { t.estudado = false; t.estudadoEm = null; t.revisaoData = null; tIds.push(t.id); } });
+  localStorage.setItem('ct_topicos', JSON.stringify(topicos));
+  const subs = CT.getSubtopicos(); subs.forEach(s => { if (s.materiaId === mId) { s.estudado = false; s.estudadoEm = null; } });
+  localStorage.setItem('ct_subtopicos', JSON.stringify(subs));
+  localStorage.setItem('ct_revisoes', JSON.stringify(CT.getRevisoes().filter(r => {
+    const ctx = CT.getContextoRevisao(r);
+    return !ctx.topicoId || !tIds.includes(ctx.topicoId);
+  })));
+  reloadPagina();
+}
+
+function fmtDate(data) { if(!data) return '-'; const p = data.split('-'); return `${p[2]}/${p[1]}`; }
+function diasAtraso(data) { if(!data) return 0; const diff = new Date(CT._today()) - new Date(data); return Math.max(0, Math.floor(diff / 86400000)); }
+
+// ── FECHAR CTX / DRAG AND DROP ────────────
+let _ctxTarget = null;
+function showCtxMenu(e, tid, sid, cid) {
+  e.preventDefault(); e.stopPropagation();
+  _ctxTarget = { tid, sid, cid };
+  const menu = document.getElementById('ctxMenu');
+  menu.style.display = 'block'; menu.style.left = e.pageX + 'px'; menu.style.top = e.pageY + 'px';
+  document.addEventListener('click', closeCtxMenu);
+}
+function closeCtxMenu() { const el = document.getElementById('ctxMenu'); if (el) el.style.display = 'none'; document.removeEventListener('click', closeCtxMenu); }
+async function ctxAcao(acao) {
+  const { tid, sid, cid } = _ctxTarget;
+  const obj = tid ? CT.getTopico(tid) : CT.getSubtopicos().find(x=>x.id===sid);
+  if (acao === 'abrir') { const cad = obj.cadernos.find(x=>x.id===cid); if(cad) abrirCaderno(null, cad.url, cad.rotulo); }
+  else if (acao === 'deletar') {
+    if(!(await CT.confirm('Remover este material?', { title: 'Remover material', confirmLabel: 'Remover' }))) return;
+    obj.cadernos = obj.cadernos.filter(x=>x.id!==cid);
+    if(tid) CT.saveTopico(obj); else CT.saveSubtopico(obj);
+    renderTopicos();
+  }
+}
+
+let _dragType = null;
+let _dragSourceId = null;
+let _dragSourceTarget = null;
+let _dragSourceParentId = null;
+
+function dragStart(e, type, id, parentId) {
+  _dragType = type;
+  _dragSourceId = id;
+  _dragSourceParentId = parentId;
+  _dragSourceTarget = e.currentTarget;
+  e.dataTransfer.effectAllowed = "move";
+  setTimeout(() => { if (_dragSourceTarget) _dragSourceTarget.style.opacity = '0.4'; }, 0);
+  e.stopPropagation();
+}
+
+function dragEnd(e) {
+  if (_dragSourceTarget) _dragSourceTarget.style.opacity = '1';
+  document.querySelectorAll('.topico-card, .subtopico-row').forEach(el => el.style.borderTop = '');
+  _dragType = null;
+  _dragSourceId = null;
+  _dragSourceTarget = null;
+}
+
+function dragOver(e, type) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (type !== _dragType || _dragSourceId === e.currentTarget.id.replace(/^(tc_|sc_)/, '')) return;
+  e.dataTransfer.dropEffect = "move";
+  e.currentTarget.style.borderTop = '2px solid var(--accent)';
+}
+
+function dragLeave(e) {
+  e.currentTarget.style.borderTop = '';
+}
+
+function drop(e, type, targetId, targetParentId) {
+  e.preventDefault();
+  e.stopPropagation();
+  e.currentTarget.style.borderTop = '';
+  if (type !== _dragType || _dragSourceId === targetId) return;
+
+  if (type === 'topico') {
+    let allTopicos = CT._get('ct_topicos');
+    let fromIdx = allTopicos.findIndex(t => t.id === _dragSourceId);
+    let toIdx = allTopicos.findIndex(t => t.id === targetId);
+    if (fromIdx >= 0 && toIdx >= 0) {
+      const moved = allTopicos.splice(fromIdx, 1)[0];
+      allTopicos.splice(toIdx, 0, moved);
+      CT._set('ct_topicos', allTopicos);
+      renderTopicos();
+    }
+  } else if (type === 'subtopico') {
+    if (_dragSourceParentId !== targetParentId) {
+      alert('Arraste apenas dentro do mesmo tópico.');
+      return;
+    }
+    let allSubs = CT._get('ct_subtopicos');
+    let fromIdx = allSubs.findIndex(s => s.id === _dragSourceId);
+    let toIdx = allSubs.findIndex(s => s.id === targetId);
+    if (fromIdx >= 0 && toIdx >= 0) {
+      const moved = allSubs.splice(fromIdx, 1)[0];
+      allSubs.splice(toIdx, 0, moved);
+      CT._set('ct_subtopicos', allSubs);
+      renderTopicos();
+    }
+  }
+}

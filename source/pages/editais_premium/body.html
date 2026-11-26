@@ -1,0 +1,158 @@
+<!-- Track do Oodeus — [R13-port] body de editais_premium.html (linhas
+     177-324 do original www/editais_premium.html). Adaptações: onclick de
+     navegação location.href → goPage (4 pontos, todas concursos.html: logo
+     179, "Voltar para Meus Concursos" 188, successBar 239, modal "Ver em
+     Meus Concursos" 256). Página standalone: SEM sidebar e SEM link de
+     ajuda no body (grep da etapa: 0 ocorrências de href="ajuda.html").
+     <img src="assets/…"> mantém o caminho relativo do original — o shell
+     reescreve na renderização. HTML estático com entidades (&aacute; etc.)
+     preservadas. Verbatim de propósito: nenhum bloco morto no body (§3.4).
+-->
+  <div class="page">
+    <div class="top-bar">
+      <div class="logo" onclick="goPage('concursos.html')">
+        <img src="assets/Track Concursos logo.png" alt="Track Concursos" class="brand-logo">
+      </div>
+      <div class="top-actions">
+        <button class="btn-outline theme-toggle" type="button" data-theme-toggle>
+          <span class="theme-toggle-indicator" aria-hidden="true"></span>
+          <span class="theme-toggle-copy">Tema</span>
+          <span class="theme-toggle-value" data-theme-label>Escuro</span>
+        </button>
+        <button class="btn-outline" type="button" onclick="goPage('concursos.html')">Voltar para Meus Concursos</button>
+      </div>
+    </div>
+
+    <section class="hero">
+      <div class="hero-main">
+        <div class="hero-kicker">Biblioteca Premium</div>
+        <h1 class="hero-title">Editais Premium</h1>
+        <p class="hero-sub">Escolha um edital pronto, confira a capa do concurso em destaque e instale direto no Track Concursos. A biblioteca sincroniza com o cat&aacute;logo online usado no site.</p>
+      </div>
+      <div class="hero-side">
+        <section class="manual-top" id="manualDropZone">
+          <div>
+            <div class="manual-top-title">Importar Edital Premium manualmente</div>
+            <div class="manual-top-sub">Importe um Edital Premium manualmente; escolha o arquivo .json ou arraste o arquivo para esta caixa.</div>
+          </div>
+          <div class="manual-top-actions">
+            <button class="btn-outline" type="button" onclick="openManualFile()">Escolher JSON</button>
+            <button id="manualImportBtn" class="btn-primary" type="button" onclick="importManualFile()" disabled>Importar</button>
+          </div>
+          <div class="manual-mini-file">
+            <div id="manualFileName" class="file-name">Nenhum arquivo selecionado</div>
+            <div id="manualFileMeta" class="file-meta">Selecione um arquivo .json</div>
+          </div>
+          <div id="manualError" class="error"></div>
+          <input id="manualFileInput" type="file" accept=".json,application/json" style="display:none">
+        </section>
+        <div class="hero-right">
+          <div class="hero-summary">
+            <div class="summary-card">
+              <div class="summary-label">Editais</div>
+              <div id="summaryTotal" class="summary-value accent">0</div>
+            </div>
+            <div class="summary-card">
+              <div class="summary-label">Filtrados</div>
+              <div id="summaryFiltered" class="summary-value">0</div>
+            </div>
+          </div>
+          <button class="request-top" type="button" onclick="openRequestNotice()">
+            <span>
+              <span class="request-title">Não achou seu concurso?</span>
+              <span class="request-action">Solicite agora</span>
+            </span>
+            <span class="request-sub">Disponibilizo o concurso solicitado em até 24h.</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <div id="successBar" class="success-bar">
+      <span id="successText">Edital Premium instalado com sucesso.</span>
+      <button class="btn-soft" type="button" onclick="goPage('concursos.html')">Ver em Meus Concursos</button>
+    </div>
+
+    <div id="installedModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="installedModalTitle">
+      <div class="modal-card">
+        <div class="modal-head">
+          <div>
+            <div class="modal-kicker">Edital já instalado</div>
+            <div id="installedModalTitle" class="modal-title">Você já possui este edital</div>
+          </div>
+          <button class="modal-close" type="button" onclick="closeInstalledNotice()" aria-label="Fechar">×</button>
+        </div>
+        <div class="modal-body">
+          <div id="installedModalCopy" class="modal-copy"></div>
+          <div id="installedModalBox" class="installed-box"></div>
+          <div class="modal-actions">
+            <button class="btn-outline" type="button" onclick="closeInstalledNotice()">Entendi</button>
+            <button class="btn-primary" type="button" onclick="goPage('concursos.html')">Ver em Meus Concursos</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="requestModal" class="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="requestModalTitle">
+      <div class="modal-card">
+        <div class="modal-head">
+          <div>
+            <div class="modal-kicker">Solicitar edital</div>
+            <div id="requestModalTitle" class="modal-title">Não achou seu concurso?</div>
+          </div>
+          <button class="modal-close" type="button" onclick="closeRequestNotice()" aria-label="Fechar">×</button>
+        </div>
+        <div class="modal-body">
+          <div class="modal-copy">Me envie o nome do concurso, cargo e qualquer detalhe que você tiver. Disponibilizarei o Edital Premium solicitado em até 24h.</div>
+          <div class="contact-grid">
+            <button class="contact-card whatsapp" type="button" onclick="openWhatsAppRequest()">
+              <span class="contact-title">WhatsApp</span>
+              <span class="contact-sub">(89) 98138-3459</span>
+              <span class="contact-sub">Abrir conversa com mensagem pronta.</span>
+            </button>
+            <button class="contact-card" type="button" onclick="copyRequestEmail()">
+              <span class="contact-title">E-mail</span>
+              <span class="contact-sub">michel.araujo.py@gmail.com</span>
+              <span class="contact-sub">Clique para copiar.</span>
+            </button>
+          </div>
+          <div class="modal-actions">
+            <button class="btn-outline" type="button" onclick="closeRequestNotice()">Fechar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <main class="store-layout">
+      <section class="store-main">
+        <div class="panel toolbar">
+          <label class="field">
+            <span class="label">Buscar edital</span>
+            <input id="searchInput" class="input" type="search" placeholder="Concurso, cargo, &oacute;rg&atilde;o...">
+          </label>
+          <label class="field">
+            <span class="label">N&iacute;vel</span>
+            <select id="nivelSelect" class="select">
+              <option value="">Todos</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="label">Banca</span>
+            <select id="bancaSelect" class="select">
+              <option value="">Todas</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="label">Sal&aacute;rio</span>
+            <select id="salarySelect" class="select">
+              <option value="">Padr&atilde;o</option>
+              <option value="desc">Maior primeiro</option>
+            </select>
+          </label>
+          <button class="btn-outline" type="button" onclick="loadCatalog(true)">Atualizar</button>
+        </div>
+        <div id="status" class="status"></div>
+        <div id="catalogGrid" class="grid"></div>
+      </section>
+    </main>
+  </div>

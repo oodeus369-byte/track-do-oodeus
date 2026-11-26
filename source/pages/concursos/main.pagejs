@@ -1,0 +1,1583 @@
+/**
+ * Track do Oodeus — [R2-port] página concursos — script principal
+ * Porta do bloco <script> inline de concursos.html do Track Concursos v1.0.6
+ * (linhas 897–2450 do baseline `src/pages/concursos.html.baseline`). Adaptações:
+ *   1. Navegação entre páginas: `location.href = …` → `goPage(…)` (3 pontos:
+ *      editarRealizado, importarEditalUnico, abrirDash). O goPage é definido
+ *      no cabeçalho adicionado logo abaixo — delega ao goPage do nav.js
+ *      (exposto como window.__CT_NAV_GO_PAGE) e cai no comportamento original.
+ *   2. Literais de asset (cópia local de FAIXAS + fallback do foguete):
+ *      caminho relativo → __ctAssetUrl('assets/…') — resolvedor global anexado
+ *      pelo host.js; com host, devolve app://…/assets/… do plugin; sem host,
+ *      devolve o caminho literal do original (comportamento de browser).
+ * Todo o resto é o original tal como está — inclusive o boot top-level
+ * (render(); renderBackupInfo(); atualizarEstadoImportPremium();) e o prompt()
+ * do toggleNomeado virou await CT.prompt(...) [R16]: o Electron não implementa
+ * prompt() (lançava "prompt() is not supported."); modal próprio assíncrono em
+ * src/data.js.showPrompt, mesma semântica (string|null). Os ramos
+ * pywebview ficam inertes por si sós (guard window.pywebview, como no original
+ * aberto num navegador comum). Este script é avaliado via window.eval pelo
+ * shell (realm clássico: function declarations vão para window e os onclick
+ * inline do body funcionam; let/const do bloco compartilham o escopo do eval).
+ */
+// [R2-port] Navegação entre páginas (mesmo contrato do goPage do nav.js).
+function goPage(dest) {
+  if (window.__CT_NAV_GO_PAGE) { window.__CT_NAV_GO_PAGE(dest); return; }
+  if (window.__CT_HOST__ && typeof window.__CT_HOST__.navigate === 'function' && window.__CT_HOST__.navigate(dest)) return;
+  window.location.href = dest;
+}
+let _perfilGeneroAtual = 'masculino';
+let _novoPerfilGenero = 'masculino';
+let _premiumImportConteudo = '';
+let _premiumImportNome = '';
+let _premiumImportTamanho = 0;
+const PREMIUM_CATALOG_URL = 'https://raw.githubusercontent.com/michel-softwares/Editais-Premium/main/catalog.json';
+const PREMIUM_CATALOG_CACHE_KEY = 'ct_premium_catalog_cache_v1';
+let _premiumCatalogItems = [];
+let _premiumCatalogMeta = {};
+let _premiumCatalogLoaded = false;
+let _premiumCatalogLoading = false;
+let _premiumCatalogInstallingId = '';
+let _premiumCatalogSelectedId = '';
+
+function generoAtualPerfil(){
+  const genero = (CT.getProfileGenero && CT.getProfileGenero()) || localStorage.getItem('ct_profile_genero') || 'masculino';
+  return genero === 'feminino' ? 'feminino' : 'masculino';
+}
+function flexGenero(masc, fem){
+  return generoAtualPerfil() === 'feminino' ? fem : masc;
+}
+function resultadoTexto(tipo, opts = {}){
+  const colocacao = opts.colocacao ? ` · ${opts.colocacao}º` : '';
+  switch (tipo) {
+    case 'aprovado':
+      return `${flexGenero('Aprovado', 'Aprovada')}${colocacao}`;
+    case 'cr':
+      return `${flexGenero('Classificado CR', 'Classificada CR')}${colocacao}`;
+    case 'aguardando':
+      return 'Aguardando Resultado';
+    case 'reprovado':
+      return `${flexGenero('Reprovado', 'Reprovada')}${colocacao}`;
+    case 'eliminado':
+      return flexGenero('Eliminado', 'Eliminada');
+    case 'aprovado_detalhe':
+      return flexGenero('Aprovado dentro das vagas', 'Aprovada dentro das vagas');
+    case 'nomeado':
+      return flexGenero('Nomeado', 'Nomeada');
+    case 'fui_nomeado':
+      return flexGenero('Sim, fui nomeado!', 'Sim, fui nomeada!');
+    case 'foi_nomeado':
+      return flexGenero('Você foi nomeado neste concurso?', 'Você foi nomeada neste concurso?');
+    case 'remover_nomeacao':
+      return 'Remover nomeação';
+    default:
+      return tipo || '';
+  }
+}
+function syncGeneroButtons(prefix, genero){
+  const masc = document.getElementById(`${prefix}GeneroMasc`);
+  const fem = document.getElementById(`${prefix}GeneroFem`);
+  if (masc) masc.classList.toggle('active', genero === 'masculino');
+  if (fem) fem.classList.toggle('active', genero === 'feminino');
+}
+function selecionarGeneroPerfilAtual(genero){
+  _perfilGeneroAtual = genero === 'feminino' ? 'feminino' : 'masculino';
+  syncGeneroButtons('perfil', _perfilGeneroAtual);
+}
+function selecionarGeneroNovoPerfil(genero){
+  _novoPerfilGenero = genero === 'feminino' ? 'feminino' : 'masculino';
+  syncGeneroButtons('novoPerfil', _novoPerfilGenero);
+}
+function pctColor(p){return CT.pctColor?CT.pctColor(p):'var(--text3)';}
+function stripe(c){
+  if(c.resultado==='aprovado')return'linear-gradient(90deg,#1a7a3a,#3ecf8e,#1a7a3a)';
+  if(c.resultado==='cr')return'linear-gradient(90deg,#FFD700,#FFE55E,#FFD700)';
+  if(c.resultado==='aguardando')return'linear-gradient(90deg,#e8eaf2,#8b90a8,#e8eaf2)';
+  if(c.resultado==='reprovado')return'linear-gradient(90deg,var(--red),#c43030)';
+  if(c.resultado==='eliminado')return'linear-gradient(90deg,var(--red),#c43030)';
+  const d=CT.diasRestantes(c);
+  if(d!=null&&d<=7)return'linear-gradient(90deg,var(--red),#c43030)';
+  if(d!=null&&d<=30)return'linear-gradient(90deg,var(--orange),var(--yellow))';
+  return'linear-gradient(90deg,var(--accent),var(--accent2))';
+}
+function lastStudy(c){
+  const s=CT.getSessoes({concursoId:c.id}).sort((a,b)=>b.data.localeCompare(a.data));
+  if(!s.length)return'nenhum estudo';
+  const hoje=CT._today();
+  const ontem=new Date();ontem.setHours(12,0,0,0);ontem.setDate(ontem.getDate()-1);
+  if(s[0].data===hoje)return'hoje';
+  if(s[0].data===CT._dateString(ontem))return'ontem';
+  return 'há ' + Math.floor((new Date(hoje)-new Date(s[0].data))/86400000) + ' dias';
+}
+function logoHTML(c, size='105px') {
+  if (c.logoPath) return `<div class="card-logo" style="width:${size};height:${size};padding:0;overflow:hidden"><img src="${c.logoPath}?t=${Date.now()}" style="width:100%;height:100%;object-fit:cover"></div>`;
+  if (c.logoBase64) return `<div class="card-logo" style="width:${size};height:${size};padding:0;overflow:hidden"><img src="${c.logoBase64}" style="width:100%;height:100%;object-fit:cover"></div>`;
+  return `<div class="card-logo">${c.logoEmoji||'🏛️'}</div>`;
+}
+function formatarSalarioCard(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const match = raw.match(/(?:R\$\s*)?\d[\d.\s]*(?:,\d{1,2})?/i);
+  if (!match) return raw;
+
+  let amount = match[0].replace(/R\$/i, '').trim().replace(/\s+/g, '');
+  const numeric = Number(amount.replace(/\./g, '').replace(',', '.'));
+  if (!Number.isFinite(numeric)) return match[0].trim();
+
+  const formatted = numeric.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2
+  });
+  const afterFirstValue = raw.slice(match.index + match[0].length);
+  const hasAdditional = /\+|adicion|benef|aux[ií]lio|vale|gratifica/i.test(afterFirstValue);
+  return `R$ ${formatted}${hasAdditional ? ' +...' : ''}`;
+}
+function concursoGrupo(c){
+  return c && c.grupoMeusConcursos === 'mira' ? 'mira' : 'foco';
+}
+function concursoOrdem(c){
+  const n = Number(c && c.ordemMeusConcursos);
+  return Number.isFinite(n) ? n : Number.MAX_SAFE_INTEGER;
+}
+function ordenarMeusConcursos(lista){
+  return lista.slice().sort((a,b) => {
+    const oa = concursoOrdem(a);
+    const ob = concursoOrdem(b);
+    if (oa !== ob) return oa - ob;
+    return String(a.criadoEm || '').localeCompare(String(b.criadoEm || '')) || String(a.nome || '').localeCompare(String(b.nome || ''));
+  });
+}
+function cardAtivo(c){
+  const materias=CT.getMaterias(c.id);
+  const top=CT.getTopicos().filter(t=>t.concursoId===c.id);
+  const est=top.filter(t=>t.estudado).length;
+  const sub=CT.getSubtopicos().filter(s=>s.concursoId===c.id);
+  const subEst=sub.filter(s=>s.estudado).length;
+  const totalUnidades=top.length+sub.length;
+  const concluidas=est+subEst;
+  const pProg=totalUnidades?Math.round(concluidas/totalUnidades*100):0;
+  const sess=CT.getSessoes({concursoId:c.id});
+  const segundos=CT.totalSegundos(sess);
+  const horas=CT.formatarTempo(segundos);
+  const q=CT.calcStats(CT.getQuestoes({concursoId:c.id}));
+  const dias=CT.diasRestantes(c);
+
+  // Faixa
+  const FAIXAS = [
+    { nome:'Faixa Branca', imagem:__ctAssetUrl('assets/faixas/faixabranca.png'), dias:0, questoes:0, sims80:0 },
+    { nome:'Faixa Amarela', imagem:__ctAssetUrl('assets/faixas/faixaamarela.png'), dias:14, questoes:250, sims80:1 },
+    { nome:'Faixa Vermelha', imagem:__ctAssetUrl('assets/faixas/faixavermelha.png'), dias:28, questoes:500, sims80:2 },
+    { nome:'Faixa Laranja', imagem:__ctAssetUrl('assets/faixas/faixalaranja.png'), dias:56, questoes:1000, sims80:3 },
+    { nome:'Faixa Verde', imagem:__ctAssetUrl('assets/faixas/faixaverde.png'), dias:84, questoes:2000, sims80:4 },
+    { nome:'Faixa Roxa', imagem:__ctAssetUrl('assets/faixas/faixaroxa.png'), dias:112, questoes:3000, sims80:5 },
+    { nome:'Faixa Marrom', imagem:__ctAssetUrl('assets/faixas/faixamarrom.png'), dias:140, questoes:5000, sims80:6 },
+    { nome:'Faixa Preta', imagem:__ctAssetUrl('assets/faixas/faixapreta.png'), dias:168, questoes:8000, sims80:7 }
+  ];
+  const diasSeguidos = CT.getDiasSeguidosEstudo ? CT.getDiasSeguidosEstudo(c.id) : 0;
+  const sims80 = CT.getSimulados(c.id).filter(s=>s.pct>=80).length;
+  let fIdx = 0;
+  for(let i=FAIXAS.length-1; i>=0; i--){
+    if(diasSeguidos>=FAIXAS[i].dias || q.resolvidas>=FAIXAS[i].questoes || sims80>=FAIXAS[i].sims80){ fIdx = i; break; }
+  }
+  fIdx = CT.aplicarBonusFaixaEdital ? CT.aplicarBonusFaixaEdital(fIdx, c, FAIXAS.length) : fIdx;
+  const faixa = FAIXAS[fIdx];
+  const faixaPretaClass = faixa.nome === 'Faixa Preta' ? ' faixa-preta-icon' : '';
+
+  const rocketSrc = CT.getPreEditalRocketAsset ? CT.getPreEditalRocketAsset(c) : ((c.coberto || 0) > 0 ? __ctAssetUrl('assets/mascots/pre-edital-rocket.gif') : __ctAssetUrl('assets/mascots/pre-edital-rocket-still.png'));
+  const rocketImg = `<img src="${rocketSrc}" class="cover-rocket-icon" alt="Foguete da cobertura">`;
+  const salarioCard = formatarSalarioCard(c.salario);
+  const cobertoPos = (!c.preEdital && c.coberto > 0)
+    ? `<div style="margin-top:2px; text-align:right">
+        <div style="font-size:10px; font-weight:700; color:var(--accent); text-transform:uppercase; letter-spacing:0.5px">Pós-edital</div>
+        <div style="font-size:11px; font-weight:600; color:var(--text3);display:inline-flex;align-items:center;gap:4px">${rocketImg} Coberto <span style="color:var(--accent2)">x${c.coberto}</span></div>
+      </div>`
+    : '';
+
+  const timerEl=c.preEdital
+    ?`<div class="card-pre-edital"><div class="card-pre-tag">Pré-edital</div><div class="card-rocket-row">${rocketImg}<div class="card-coberto">coberto <span>x${c.coberto||0}</span></div></div></div>`
+    :`<div class="card-timer"><div class="card-timer-num" style="color:${dias==null?'var(--accent)':dias<=7?'var(--red)':dias<=30?'var(--orange)':'var(--accent)'}">${dias??'-'}</div><div class="card-timer-label">dias p/ prova</div>${cobertoPos}</div>`;
+  return `<div class="concurso-card ${c.preEdital?'pre-edital-card':''}" data-contest-card data-contest-id="${c.id}" draggable="false" onclick="abrirDash('${c.id}')" style="cursor:pointer">
+    <div class="card-top-stripe" data-drag-handle title="Arraste para reorganizar" style="background:${stripe(c)}"></div>
+    <div class="card-body">
+      <div class="card-inst">
+        ${logoHTML(c)}
+        <div class="card-inst-info">
+          <div class="card-nome">${c.nome}</div>
+          <div class="card-banca">${c.banca||'Banca não definida'}</div>
+          ${c.cargo?`<div class="card-cargo">${c.cargo}</div>`:''}
+          ${salarioCard?`<div class="card-salario">${salarioCard}</div>`:''}
+          <div class="card-faixa-row">
+            <img src="${faixa.imagem}" class="card-faixa-icon${faixaPretaClass}" alt="">
+            <span class="card-faixa-name">${faixa.nome}</span>
+          </div>
+        </div>
+        ${timerEl}
+      </div>
+      <div class="card-stats">
+        <div class="card-stat"><div class="card-stat-val">${segundos>0?horas:'<span style="color:var(--text3);font-size:12px">-</span>'}</div><div class="card-stat-label">Horas</div></div>
+        <div class="card-stat"><div class="card-stat-val">${q.resolvidas>0?q.resolvidas:'<span style="color:var(--text3);font-size:12px">-</span>'}</div><div class="card-stat-label">Questões</div></div>
+        <div class="card-stat"><div class="card-stat-val" style="color:${pctColor(q.pct)}">${q.pct!=null?q.pct+'%':'<span style="color:var(--text3);font-size:12px">-</span>'}</div><div class="card-stat-label">Acertos</div></div>
+      </div>
+      <div class="card-prog-head">
+        <div class="card-prog-main">
+          <span>Progresso</span>
+          <span class="card-prog-total">${concluidas} / ${totalUnidades} (${pProg}%)</span>
+        </div>
+        <div class="card-prog-breakdown">
+          <span>Matérias <strong>${materias.length}</strong></span>
+          <span>Tópicos <strong>${totalUnidades}</strong></span>
+        </div>
+      </div>
+      <div class="card-prog-bar"><div class="card-prog-fill" style="width:${pProg}%;background:${stripe(c)}"></div></div>
+      <div class="card-toggle-row">
+        <span class="card-toggle-label">Contar nas estatísticas gerais</span>
+        <label class="toggle-switch" onclick="event.stopPropagation()">
+          <input type="checkbox" ${c.contarEstatisticas!==false?'checked':''} onchange="toggleStat('${c.id}',this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+    <div class="card-footer">
+      <div class="card-last-study">Último estudo: <strong>${lastStudy(c)}</strong></div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <button onclick="event.stopPropagation();editarRealizado('${c.id}')" style="padding:5px 12px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text3);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text3)'">Editar</button>
+        <button data-del="${c.id}" onclick="event.stopPropagation();deletarConcurso(this.dataset.del)" style="padding:5px 12px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text3);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text3)'">Excluir</button>
+        <div class="card-enter">Abrir -></div>
+      </div>
+    </div>
+  </div>`;
+}
+function cardRealizado(c){
+  const q=CT.calcStats(CT.getQuestoes({concursoId:c.id}));
+  const _sess=CT.getSessoes({concursoId:c.id});
+  const segundos=CT.totalSegundos(_sess);
+  const horas=CT.formatarTempo(segundos);
+  const isAp=c.resultado==='aprovado',isCR=c.resultado==='cr',isRep=c.resultado==='reprovado',isAgu=c.resultado==='aguardando',isElim=c.resultado==='eliminado';
+  const sColor=isAp?'var(--green)':isCR?'var(--yellow)':isAgu?'var(--text)':isRep?'var(--red)':'var(--red)';
+  const sLabel=resultadoTexto(isAp?'aprovado':isCR?'cr':isAgu?'aguardando':isRep?'reprovado':'eliminado',{colocacao:c.colocacao});
+  const salarioCard = formatarSalarioCard(c.salario);
+  
+  const isNom = c.nomeado && c.nomeado.ativo;
+  const nomeadoHtml = isNom ? `<div class="nomeado-belt-wrap"><div class="nomeado-belt"><span class="belt-title">🎉 ${resultadoTexto('nomeado').toUpperCase()} 🎉</span>${c.nomeado.data?`<span class="belt-date">${c.nomeado.data}</span>`:''}</div></div>` : '';
+  const stamp=isAp?`<div class="crown-badge">👑</div><div class="stamp-wrap"><div class="stamp aprovado">${flexGenero('APROVADO','APROVADA')}</div></div>`:isCR?`<div class="stamp-wrap"><div class="stamp cr">CLASS. CR</div></div>`:isRep?`<div class="stamp-wrap"><div class="stamp reprovado">${flexGenero('REPROVADO','REPROVADA')}</div></div>`:isElim?`<div class="stamp-wrap"><div class="stamp reprovado">${flexGenero('ELIMINADO','ELIMINADA')}</div></div>`:isAgu?`<div class="stamp-wrap"><div class="stamp" style="background:rgba(232,234,242,0.92);color:#111;box-shadow:0 0 10px rgba(255,255,255,0.2)">AGUARDANDO</div></div>`:'';
+  
+  return`<div class="concurso-card ${isAp?'aprovado':isCR?'cr':''}" onclick="abrirRelatorio('${c.id}')" style="cursor:pointer">
+    <div class="card-top-stripe" style="background:${stripe(c)}"></div>
+    ${stamp}
+    <div class="card-body">
+      ${c.dataProva?`<div class="card-timestamp">📅 ${c.dataProva.split('-').reverse().join('/')}</div>`:''}
+      <div class="card-inst">
+        ${logoHTML(c)}
+        <div class="card-inst-info">
+          <div class="card-nome">${c.nome}</div>
+          <div class="card-banca">${c.banca||'Banca não definida'}</div>
+          ${c.cargo?`<div class="card-cargo">${c.cargo}</div>`:''}
+          ${salarioCard?`<div class="card-salario">${salarioCard}</div>`:''}
+          ${c.colocacao?`<div style="display:inline-flex;align-items:center;gap:5px;background:rgba(255,255,255,0.04);border:1px solid var(--border);border-radius:20px;padding:2px 10px;margin-top:8px">
+            <span style="font-family:var(--mono);font-size:12px;font-weight:700;color:${sColor}">${c.colocacao}º ${flexGenero('colocado','colocada')}</span>
+          </div>`:''}
+        </div>
+      </div>
+      <div class="card-stats">
+        <div class="card-stat"><div class="card-stat-val">${segundos>0?horas:'<span style="color:var(--text3);font-size:12px">-</span>'}</div><div class="card-stat-label">Horas</div></div>
+        <div class="card-stat"><div class="card-stat-val">${q.resolvidas>0?q.resolvidas:'<span style="color:var(--text3);font-size:12px">-</span>'}</div><div class="card-stat-label">Questões</div></div>
+        <div class="card-stat"><div class="card-stat-val" style="color:${pctColor(q.pct)}">${q.pct!=null?q.pct+'%':'<span style="color:var(--text3);font-size:12px">-</span>'}</div><div class="card-stat-label">Acertos</div></div>
+      </div>
+      ${nomeadoHtml}
+      <div class="card-toggle-row">
+        <span class="card-toggle-label">Contar nas estatísticas gerais</span>
+        <label class="toggle-switch" onclick="event.stopPropagation()">
+          <input type="checkbox" ${c.contarEstatisticas?'checked':''} onchange="toggleStat('${c.id}',this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+    </div>
+    <div class="card-footer">
+      <div class="card-last-study" style="color:${sColor};font-weight:600">${sLabel}</div>
+      <div style="display:flex;align-items:center;gap:6px">
+        <button onclick="event.stopPropagation();editarRealizado('${c.id}')" style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text3);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text3)'">Editar</button>
+        <button data-del="${c.id}" onclick="event.stopPropagation();deletarConcurso(this.dataset.del)" style="padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:transparent;color:var(--text3);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s" onmouseover="this.style.borderColor='var(--red)';this.style.color='var(--red)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text3)'">Excluir</button>
+        <div class="card-enter" style="color:${sColor};cursor:pointer" onclick="event.stopPropagation();abrirRelatorio('${c.id}')">Ver -></div>
+      </div>
+    </div>
+  </div>`;
+}
+async function deletarConcurso(id) {
+  const todos = CT.getConcursos();
+  const c = todos.find(x => String(x.id) === String(id));
+  const nome = c ? c.nome : 'este concurso';
+  if (await CT.confirm('Tem certeza que deseja excluir "' + nome + '"?\n\nEsta ação não pode ser desfeita. Todos os dados de estudo, questões e revisões serão apagados permanentemente.', {
+    title: 'Excluir concurso',
+    confirmLabel: 'Excluir',
+  })) {
+    CT.deleteConcurso(id);
+    
+    // Remove o logo fisico se houver
+    if (window.pywebview && window.pywebview.api) {
+        window.pywebview.api.remover_logo(id);
+    }
+
+    render();
+  }
+}
+function editarRealizado(id) {
+  goPage('cadastro_edital.html?editar=' + encodeURIComponent(id));
+}
+function importarEditalUnico() {
+  goPage('editais_premium.html');
+}
+
+// <CT_DEV_TOOLS_PROMPT_FN>
+function abrirDevToolsHub() {
+  const overlay = document.getElementById('modalDevToolsHub');
+  if (overlay) overlay.classList.add('visible');
+}
+
+function fecharDevToolsHub() {
+  const overlay = document.getElementById('modalDevToolsHub');
+  if (overlay) overlay.classList.remove('visible');
+}
+
+async function executarVerticalizacaoAutomatizada() {
+  fecharDevToolsHub();
+  await exportarPromptTemplateIA();
+}
+
+async function exportarPromptTemplateIA() {
+  if (!CT.gerarPromptTemplateEditalIA || !CT.exportarPacotePromptTemplateEditalIA) {
+    alert('Ferramenta de Verticalização Automatizada de Edital indisponível nesta versão.');
+    return;
+  }
+  const prompt = CT.gerarPromptTemplateEditalIA();
+  copiarTextoPremium(prompt, 'Prompt de verticalização copiado para a área de transferência.');
+  const res = await CT.exportarPacotePromptTemplateEditalIA();
+  if (res && res.ok) {
+    CT.toast('Pacote de Verticalização Automatizada de Edital exportado.', 'IA');
+  } else if (res && res.motivo !== 'cancelado') {
+    CT.toast('Erro ao exportar pacote IA: ' + (res.motivo || 'desconhecido'), 'Erro');
+  }
+}
+// </CT_DEV_TOOLS_PROMPT_FN>
+function premiumEscapeHtml(value){
+  return String(value == null ? '' : value).replace(/[&<>"']/g, ch => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[ch]));
+}
+function premiumEscapeAttr(value){
+  return premiumEscapeHtml(value);
+}
+function normalizarTextoPremium(value){
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+function premiumSlug(value){
+  return normalizarTextoPremium(value).replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'edital-premium';
+}
+function adicionarCacheBustPremium(url, version){
+  if (!url) return '';
+  try {
+    const u = new URL(url);
+    if (version) u.searchParams.set('v', version);
+    return u.href;
+  } catch (_) {
+    if (!version) return url;
+    return url + (url.includes('?') ? '&' : '?') + 'v=' + encodeURIComponent(version);
+  }
+}
+function resolverUrlCatalogoPremium(value, baseUrl, version){
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  let resolved = raw;
+  try {
+    if (/^https?:\/\//i.test(raw)) {
+      resolved = raw;
+    } else {
+      resolved = new URL(raw, baseUrl).href;
+    }
+  } catch (_) {
+    resolved = raw;
+  }
+  return version ? adicionarCacheBustPremium(resolved, version) : resolved;
+}
+function inferirNivelPremium(item){
+  const tags = Array.isArray(item.tags) ? item.tags.join(' ') : '';
+  const texto = normalizarTextoPremium([tags, item.cargo, item.descricao, item.titulo, item.orgao].join(' '));
+  if (texto.includes('nivel fundamental') || texto.includes('ensino fundamental') || /\bfundamental\b/.test(texto)) return 'Fundamental';
+  if (texto.includes('nivel superior') || texto.includes('ensino superior') || /\bsuperior\b/.test(texto)) return 'Superior';
+  if (texto.includes('nivel medio') || texto.includes('ensino medio') || texto.includes('nivel tecnico') || /\bmedio\b/.test(texto)) return 'Medio';
+  return 'Nao informado';
+}
+function canonicalNivelPremium(value){
+  const raw = String(value || '').toLowerCase();
+  const normalized = normalizarTextoPremium(value);
+  const loose = normalized.replace(/[^a-z0-9]+/g, '');
+  if (normalized.includes('fundamental') || raw.includes('fundamental')) return 'Fundamental';
+  if (normalized.includes('superior') || raw.includes('superior')) return 'Superior';
+  if (loose.includes('medio') || loose.includes('mdio') || loose.includes('madio') || raw.includes('m\u00e9dio') || raw.includes('m\u00e3\u00a9dio') || raw.includes('m\u00c3\u00a9dio')) return 'Medio';
+  return 'Nao informado';
+}
+function displayNivelPremium(value){
+  const level = canonicalNivelPremium(value);
+  if (level === 'Fundamental') return 'N\u00edvel Fundamental';
+  if (level === 'Superior') return 'N\u00edvel Superior';
+  if (level === 'Medio') return 'N\u00edvel M\u00e9dio';
+  return 'N\u00e3o informado';
+}
+function formatarDataCatalogoPremium(value){
+  if (!value) return '';
+  const data = new Date(value);
+  if (Number.isNaN(data.getTime())) return '';
+  return data.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+function normalizarItemCatalogoPremium(item, baseUrl, catalogUpdated){
+  const tags = Array.isArray(item.tags) ? item.tags.map(t => String(t || '').trim()).filter(Boolean) : [];
+  const version = item.atualizadoEm || catalogUpdated || '';
+  const titulo = String(item.titulo || item.nome || 'Edital Premium').trim();
+  const cargo = String(item.cargo || '').trim();
+  const banca = String(item.banca || 'A definir').trim();
+  const orgao = String(item.orgao || '').trim();
+  const ano = item.ano ? String(item.ano) : '';
+  const descricao = String(item.descricao || '').trim();
+  const id = String(item.id || premiumSlug([titulo, cargo, ano].join(' '))).trim();
+  const nivel = canonicalNivelPremium(inferirNivelPremium({ ...item, titulo, cargo, banca, orgao, tags, descricao }));
+  const normalized = {
+    id,
+    titulo,
+    orgao,
+    banca,
+    cargo,
+    ano,
+    tags,
+    descricao,
+    nivel,
+    arquivoNome: String(item.arquivoNome || '').trim(),
+    atualizadoEm: item.atualizadoEm || catalogUpdated || '',
+    imagemUrl: resolverUrlCatalogoPremium(item.imagem, baseUrl, version),
+    arquivoUrl: resolverUrlCatalogoPremium(item.arquivo, baseUrl, version)
+  };
+  normalized.busca = normalizarTextoPremium([normalized.titulo, normalized.orgao, normalized.banca, normalized.cargo, normalized.ano, normalized.nivel, normalized.tags.join(' ')].join(' '));
+  return normalized;
+}
+function lerCacheCatalogoPremium(){
+  try {
+    const raw = localStorage.getItem(PREMIUM_CATALOG_CACHE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch (_) {
+    return null;
+  }
+}
+function salvarCacheCatalogoPremium(data){
+  try {
+    localStorage.setItem(PREMIUM_CATALOG_CACHE_KEY, JSON.stringify(data));
+  } catch (_) {}
+}
+function aplicarCatalogoPremium(data, origem = 'online'){
+  const editais = Array.isArray(data && data.editais) ? data.editais : [];
+  const updated = (data && data.atualizadoEm) || '';
+  _premiumCatalogItems = editais
+    .map(item => normalizarItemCatalogoPremium(item, PREMIUM_CATALOG_URL, updated))
+    .filter(item => item.arquivoUrl);
+  _premiumCatalogMeta = {
+    atualizadoEm: updated,
+    origem
+  };
+  if (!_premiumCatalogSelectedId || !_premiumCatalogItems.some(item => item.id === _premiumCatalogSelectedId)) {
+    _premiumCatalogSelectedId = _premiumCatalogItems[0] ? _premiumCatalogItems[0].id : '';
+  }
+  _premiumCatalogLoaded = true;
+  renderizarFiltrosCatalogoPremium();
+  renderizarCatalogoPremium();
+}
+function definirStatusCatalogoPremium(msg, tipo = ''){
+  const el = document.getElementById('premiumCatalogStatus');
+  if (!el) return;
+  el.classList.toggle('error', tipo === 'error');
+  el.innerHTML = msg || '';
+}
+function renderizarFiltrosCatalogoPremium(){
+  const nivelEl = document.getElementById('premiumCatalogNivel');
+  const bancaEl = document.getElementById('premiumCatalogBanca');
+  if (!nivelEl || !bancaEl) return;
+  const nivelAtual = nivelEl.value;
+  const bancaAtual = bancaEl.value;
+  const niveisBase = ['Fundamental', 'Medio', 'Superior', 'Nao informado'];
+  const niveis = niveisBase.filter(nivel => _premiumCatalogItems.some(item => canonicalNivelPremium(item.nivel) === nivel));
+  const bancas = Array.from(new Set(_premiumCatalogItems.map(item => item.banca || 'A definir'))).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  nivelEl.innerHTML = '<option value="">Todos</option>' + niveis.map(nivel => `<option value="${premiumEscapeAttr(nivel)}">${premiumEscapeHtml(displayNivelPremium(nivel))}</option>`).join('');
+  bancaEl.innerHTML = '<option value="">Todas</option>' + bancas.map(banca => `<option value="${premiumEscapeAttr(banca)}">${premiumEscapeHtml(banca)}</option>`).join('');
+  nivelEl.value = nivelAtual && niveis.includes(canonicalNivelPremium(nivelAtual)) ? canonicalNivelPremium(nivelAtual) : '';
+  bancaEl.value = bancas.includes(bancaAtual) ? bancaAtual : '';
+}
+function obterCatalogoFiltradoPremium(){
+  const busca = normalizarTextoPremium(document.getElementById('premiumCatalogSearch')?.value || '');
+  const nivel = document.getElementById('premiumCatalogNivel')?.value || '';
+  const banca = document.getElementById('premiumCatalogBanca')?.value || '';
+  return _premiumCatalogItems.filter(item => {
+    if (busca && !item.busca.includes(busca)) return false;
+    if (nivel && canonicalNivelPremium(item.nivel) !== nivel) return false;
+    if (banca && item.banca !== banca) return false;
+    return true;
+  });
+}
+function cardCatalogoPremium(item){
+  const idParam = encodeURIComponent(item.id);
+  const instalando = _premiumCatalogInstallingId === item.id;
+  const tags = [
+    displayNivelPremium(item.nivel),
+    item.banca,
+    ...(item.tags || []).filter(tag => !normalizarTextoPremium(tag).includes('nivel') && canonicalNivelPremium(tag) === 'Nao informado')
+  ].filter(Boolean).slice(0, 4);
+  const imagemHtml = item.imagemUrl
+    ? `<div class="premium-store-media"><img src="${premiumEscapeAttr(item.imagemUrl)}" alt="Capa do edital ${premiumEscapeAttr(item.titulo)}" loading="lazy" decoding="async"></div>`
+    : `<div class="premium-store-media placeholder">Imagem do edital não informada</div>`;
+  return `
+    <article class="premium-store-card ${_premiumCatalogSelectedId === item.id ? 'selected' : ''}" onclick="selecionarDetalheEditalPremium(decodeURIComponent('${idParam}'))">
+      ${imagemHtml}
+      <div class="premium-store-content">
+        <div class="premium-store-kicker">
+          <span>${premiumEscapeHtml(item.banca || 'Banca a definir')}</span>
+          ${item.ano ? `<span class="premium-store-year">${premiumEscapeHtml(item.ano)}</span>` : ''}
+        </div>
+        <div class="premium-store-title">${premiumEscapeHtml(item.titulo)}</div>
+        ${item.cargo ? `<div class="premium-store-cargo">${premiumEscapeHtml(item.cargo)}</div>` : ''}
+        <div class="premium-store-tags">
+          ${tags.map(tag => `<span class="premium-store-tag">${premiumEscapeHtml(tag)}</span>`).join('')}
+        </div>
+        <div class="premium-store-actions">
+          <button class="profile-btn-small" type="button" onclick="event.stopPropagation();selecionarDetalheEditalPremium(decodeURIComponent('${idParam}'))">Detalhes</button>
+          <button class="profile-btn-small primary" type="button" onclick="event.stopPropagation();instalarEditalPremiumCatalogo(decodeURIComponent('${idParam}'))" ${instalando ? 'disabled' : ''}>${instalando ? 'Instalando...' : 'Instalar'}</button>
+        </div>
+      </div>
+    </article>`;
+}
+function renderizarCatalogoPremium(){
+  const grid = document.getElementById('premiumCatalogGrid');
+  if (!grid) return;
+  if (_premiumCatalogLoading && !_premiumCatalogItems.length) {
+    grid.innerHTML = '<div class="premium-store-empty">Carregando biblioteca premium...</div>';
+    return;
+  }
+  const filtrados = obterCatalogoFiltradoPremium();
+  const data = formatarDataCatalogoPremium(_premiumCatalogMeta.atualizadoEm);
+  const origem = _premiumCatalogMeta.origem === 'cache' ? 'cache local' : 'catálogo online';
+  definirStatusCatalogoPremium(`<strong>${filtrados.length}</strong> edital${filtrados.length === 1 ? '' : 's'} encontrado${filtrados.length === 1 ? '' : 's'}${data ? ` · atualizado em ${data}` : ''} · ${origem}`);
+  grid.innerHTML = filtrados.length
+    ? filtrados.map(cardCatalogoPremium).join('')
+    : '<div class="premium-store-empty">Nenhum edital encontrado com esses filtros. Tente limpar a busca ou escolher outra banca.</div>';
+  if (!_premiumCatalogSelectedId || !filtrados.some(item => item.id === _premiumCatalogSelectedId)) {
+    _premiumCatalogSelectedId = filtrados[0] ? filtrados[0].id : '';
+  }
+  renderizarDetalhesCatalogoPremium(_premiumCatalogSelectedId);
+}
+function atualizarFiltrosCatalogoPremium(){
+  renderizarCatalogoPremium();
+}
+function renderizarDetalhesCatalogoPremium(id){
+  const panel = document.getElementById('premiumCatalogDetails');
+  if (!panel) return;
+  const item = _premiumCatalogItems.find(edital => edital.id === id);
+  if (!item) {
+    panel.innerHTML = `
+      <div class="premium-details-title">Detalhes do concurso</div>
+      <div class="premium-details-sub">Selecione um edital da biblioteca para ver banca, nível, cargo e observações.</div>
+      <div class="premium-details-note">Ao instalar, o Track baixa o JSON premium por trás e cria o concurso no perfil ativo sem trazer estatísticas de outro usuário.</div>`;
+    return;
+  }
+  const idParam = encodeURIComponent(item.id);
+  const data = formatarDataCatalogoPremium(item.atualizadoEm);
+  panel.innerHTML = `
+    <div class="premium-details-title">${premiumEscapeHtml(item.titulo)}</div>
+    ${item.cargo ? `<div class="premium-details-sub">${premiumEscapeHtml(item.cargo)}</div>` : ''}
+    <div class="premium-details-list">
+      <div class="premium-details-row"><span class="premium-details-label">Banca</span><span class="premium-details-value">${premiumEscapeHtml(item.banca || 'A definir')}</span></div>
+      <div class="premium-details-row"><span class="premium-details-label">N\u00edvel</span><span class="premium-details-value">${premiumEscapeHtml(displayNivelPremium(item.nivel))}</span></div>
+      ${item.ano ? `<div class="premium-details-row"><span class="premium-details-label">Ano</span><span class="premium-details-value">${premiumEscapeHtml(item.ano)}</span></div>` : ''}
+      ${data ? `<div class="premium-details-row"><span class="premium-details-label">Atualizado</span><span class="premium-details-value">${premiumEscapeHtml(data)}</span></div>` : ''}
+    </div>
+    <div class="premium-details-note">${premiumEscapeHtml(item.descricao || 'Edital Premium pronto para instalar no Track Concursos.')}</div>
+    <button class="profile-btn-small primary" type="button" onclick="instalarEditalPremiumCatalogo(decodeURIComponent('${idParam}'))">Instalar Edital Premium</button>`;
+}
+function selecionarDetalheEditalPremium(id){
+  _premiumCatalogSelectedId = String(id || '');
+  renderizarCatalogoPremium();
+}
+async function carregarCatalogoPremium(force = false){
+  if (_premiumCatalogLoading) return;
+  const cache = lerCacheCatalogoPremium();
+  let erroSemCatalogo = false;
+  if (!force && !_premiumCatalogItems.length && cache && Array.isArray(cache.editais)) {
+    aplicarCatalogoPremium(cache, 'cache');
+  }
+  _premiumCatalogLoading = true;
+  definirStatusCatalogoPremium(_premiumCatalogItems.length ? 'Sincronizando biblioteca premium...' : 'Carregando biblioteca premium...');
+  renderizarCatalogoPremium();
+  try {
+    const url = adicionarCacheBustPremium(PREMIUM_CATALOG_URL, Date.now());
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    salvarCacheCatalogoPremium(data);
+    aplicarCatalogoPremium(data, 'online');
+  } catch (err) {
+    if (!_premiumCatalogItems.length && cache && Array.isArray(cache.editais)) {
+      aplicarCatalogoPremium(cache, 'cache');
+      definirStatusCatalogoPremium('Não foi possível sincronizar agora. Mostrando o cache local da biblioteca.');
+    } else {
+      definirStatusCatalogoPremium('Não foi possível carregar a biblioteca premium. Verifique sua conexão e tente atualizar novamente.', 'error');
+      erroSemCatalogo = true;
+      const grid = document.getElementById('premiumCatalogGrid');
+      if (grid) grid.innerHTML = '<div class="premium-store-empty">A biblioteca premium não carregou agora. Clique em Atualizar ou tente novamente em instantes.</div>';
+    }
+  } finally {
+    _premiumCatalogLoading = false;
+    if (!erroSemCatalogo) renderizarCatalogoPremium();
+  }
+}
+async function instalarEditalPremiumCatalogo(id){
+  const item = _premiumCatalogItems.find(edital => edital.id === String(id || ''));
+  if (!item || !item.arquivoUrl) {
+    definirStatusCatalogoPremium('Este edital ainda não possui arquivo JSON vinculado no catálogo.', 'error');
+    return;
+  }
+  _premiumCatalogInstallingId = item.id;
+  definirStatusCatalogoPremium(`Baixando e instalando <strong>${premiumEscapeHtml(item.titulo)}</strong>...`);
+  renderizarCatalogoPremium();
+  try {
+    const res = await fetch(adicionarCacheBustPremium(item.arquivoUrl, Date.now()), { cache: 'no-store' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const conteudo = await res.text();
+    const r = CT.importarConcurso(conteudo);
+    if (r && r.ok) {
+      _premiumCatalogInstallingId = '';
+      fecharModalImportPremium();
+      render();
+      abrirModalPremiumSuccess(r);
+      return;
+    }
+    definirStatusCatalogoPremium('Não foi possível instalar esse edital: ' + ((r && r.erro) || 'erro desconhecido'), 'error');
+  } catch (err) {
+    definirStatusCatalogoPremium('Não foi possível baixar ou instalar esse edital premium. Tente atualizar a biblioteca e repetir.', 'error');
+  } finally {
+    _premiumCatalogInstallingId = '';
+    renderizarCatalogoPremium();
+  }
+}
+function formatarTamanhoArquivo(bytes){
+  const num = Number(bytes || 0);
+  if (!num || num < 1) return '';
+  if (num < 1024) return `${num} B`;
+  if (num < 1024 * 1024) return `${(num / 1024).toFixed(1).replace('.0', '')} KB`;
+  return `${(num / (1024 * 1024)).toFixed(1).replace('.0', '')} MB`;
+}
+function definirErroImportPremium(msg){
+  const el = document.getElementById('premiumImportError');
+  if (!el) return;
+  if (msg) {
+    el.textContent = msg;
+    el.style.display = 'block';
+  } else {
+    el.textContent = '';
+    el.style.display = 'none';
+  }
+}
+function atualizarEstadoImportPremium(){
+  const wrapper = document.getElementById('premiumImportFile');
+  const nameEl = document.getElementById('premiumImportFileName');
+  const metaEl = document.getElementById('premiumImportFileMeta');
+  const confirmBtn = document.getElementById('btnConfirmarImportPremium');
+  if (wrapper) wrapper.classList.toggle('empty', !_premiumImportConteudo);
+  if (nameEl) nameEl.textContent = _premiumImportNome || 'Nenhum arquivo selecionado';
+  if (metaEl) {
+    metaEl.textContent = _premiumImportConteudo
+      ? `Arquivo carregado com sucesso${_premiumImportTamanho ? ` • ${formatarTamanhoArquivo(_premiumImportTamanho)}` : ''}`
+      : 'Use um JSON exportado do Edital Premium.';
+  }
+  if (confirmBtn) {
+    confirmBtn.disabled = !_premiumImportConteudo;
+    if (confirmBtn.textContent === 'Importando...') confirmBtn.textContent = 'Importar arquivo';
+  }
+}
+function limparImportPremium(){
+  _premiumImportConteudo = '';
+  _premiumImportNome = '';
+  _premiumImportTamanho = 0;
+  const input = document.getElementById('filePremiumImport');
+  if (input) input.value = '';
+  definirErroImportPremium('');
+  atualizarEstadoImportPremium();
+}
+function preencherImportPremium(conteudo, nome = 'Edital Premium.json', tamanho = 0){
+  _premiumImportConteudo = String(conteudo || '');
+  _premiumImportNome = nome || 'Edital Premium.json';
+  _premiumImportTamanho = tamanho || (_premiumImportConteudo ? new Blob([_premiumImportConteudo]).size : 0);
+  definirErroImportPremium('');
+  atualizarEstadoImportPremium();
+}
+function abrirModalImportPremium(){
+  const overlay = document.getElementById('modalImportPremium');
+  if (!overlay) return;
+  limparImportPremium();
+  overlay.classList.add('visible');
+  carregarCatalogoPremium(false);
+  setTimeout(() => {
+    const search = document.getElementById('premiumCatalogSearch');
+    if (search) search.focus();
+  }, 40);
+}
+function fecharModalImportPremium(){
+  const overlay = document.getElementById('modalImportPremium');
+  if (overlay) overlay.classList.remove('visible');
+  limparImportPremium();
+}
+function formatarDataPremiumBR(value){
+  const parts = String(value || '').split('-');
+  if (parts.length === 3) return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  return value || '';
+}
+function abrirModalPremiumSuccess(importInfo){
+  const overlay = document.getElementById('modalPremiumSuccess');
+  const notice = document.getElementById('premiumSuccessNotice');
+  if (notice) {
+    if (importInfo && importInfo.convertedPastPostEdital) {
+      const data = formatarDataPremiumBR(importInfo.originalDataProva);
+      notice.innerHTML = `<strong>P&oacute;s-edital antigo convertido</strong>A prova deste edital premium${data ? ` foi em ${data}` : ''} e j&aacute; ocorreu. O Track importou a estrutura como pr&eacute;-edital para voc&ecirc; usar na prepara&ccedil;&atilde;o do pr&oacute;ximo concurso.`;
+      notice.style.display = 'block';
+    } else {
+      notice.innerHTML = '';
+      notice.style.display = 'none';
+    }
+  }
+  if (overlay) overlay.classList.add('visible');
+}
+function fecharModalPremiumSuccess(){
+  const overlay = document.getElementById('modalPremiumSuccess');
+  if (overlay) overlay.classList.remove('visible');
+}
+async function abrirSeletorEditalPremium(){
+  definirErroImportPremium('');
+  if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.selecionar_arquivo_json === 'function') {
+    const res = await window.pywebview.api.selecionar_arquivo_json();
+    if (res && res.ok && res.conteudo) {
+      const caminho = String(res.caminho || '');
+      const nome = caminho ? caminho.split(/[\\/]/).pop() : 'Edital Premium.json';
+      preencherImportPremium(res.conteudo, nome, new Blob([res.conteudo]).size);
+    } else if (res && res.motivo && res.motivo !== 'cancelado') {
+      definirErroImportPremium('Não foi possível carregar o arquivo selecionado. Tente novamente.');
+    }
+    return;
+  }
+  const input = document.getElementById('filePremiumImport');
+  if (input) {
+    input.value = '';
+    input.click();
+  }
+}
+function processarArquivoEditalPremium(file){
+  if (!file) return;
+  if (!/\.json$/i.test(file.name || '')) {
+    definirErroImportPremium('Selecione um arquivo JSON válido do Edital Premium.');
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = ev => {
+    preencherImportPremium(ev.target.result, file.name, file.size || 0);
+  };
+  reader.onerror = () => {
+    definirErroImportPremium('Não foi possível ler o arquivo selecionado. Tente novamente.');
+  };
+  reader.readAsText(file);
+}
+function copiarTextoPremium(valor, mensagemSucesso){
+  const sucesso = () => {
+    if (window.CT && typeof CT.toast === 'function') {
+      CT.toast(mensagemSucesso, '📧');
+    }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(valor).then(sucesso).catch(() => copiarTextoPremiumFallback(valor, sucesso));
+    return;
+  }
+  copiarTextoPremiumFallback(valor, sucesso);
+}
+function copiarTextoPremiumFallback(valor, onSuccess){
+  const temp = document.createElement('textarea');
+  temp.value = valor;
+  temp.setAttribute('readonly', '');
+  temp.style.position = 'absolute';
+  temp.style.left = '-9999px';
+  document.body.appendChild(temp);
+  temp.select();
+  document.execCommand('copy');
+  document.body.removeChild(temp);
+  if (typeof onSuccess === 'function') onSuccess();
+}
+function copiarEmailEditalPremium(){
+  copiarTextoPremium('michel.araujo.py@gmail.com', 'E-mail copiado para a área de transferência.');
+}
+async function confirmarImportacaoEditalPremium(){
+  const btn = document.getElementById('btnConfirmarImportPremium');
+  if (!_premiumImportConteudo) {
+    definirErroImportPremium('Carregue um Edital Premium antes de importar.');
+    return;
+  }
+  definirErroImportPremium('');
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = 'Importando...';
+  }
+  try {
+    const r = CT.importarConcurso(_premiumImportConteudo);
+    if (btn) btn.textContent = 'Importar arquivo';
+    if (r && r.ok) {
+      fecharModalImportPremium();
+      render();
+      abrirModalPremiumSuccess(r);
+      return;
+    }
+    if (btn) btn.disabled = false;
+    definirErroImportPremium('Não foi possível importar esse arquivo: ' + ((r && r.erro) || 'erro desconhecido'));
+  } catch (err) {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = 'Importar arquivo';
+    }
+    definirErroImportPremium('O arquivo não pode ser importado. Verifique se ele é um JSON válido do Edital Premium.');
+  }
+}
+function render(){
+  renderBackupInfo();
+  const todos=CT.getConcursos();
+  const ativos=todos.filter(c=>!c.realizado);
+  const foco=ordenarMeusConcursos(ativos.filter(c=>concursoGrupo(c)==='foco'));
+  const mira=ordenarMeusConcursos(ativos.filter(c=>concursoGrupo(c)==='mira'));
+  const realizados=todos.filter(c=>c.realizado).sort((a,b) => (b.dataProva||'').localeCompare(a.dataProva||''));
+  const s=CT.estatisticasGerais();
+  document.getElementById('sHoras').textContent=s.horasTotais||'0h';
+  document.getElementById('sQuestoes').textContent=s.questoesTotal||0;
+  document.getElementById('sAcertos').textContent=s.taxaAcertos!=null?s.taxaAcertos+'%':'-';
+  document.getElementById('sUltSim').textContent=s.ultimoSimulado!=null?s.ultimoSimulado+'%':'-';
+  document.getElementById('sMediaSim').textContent=s.mediaSimulados!=null?s.mediaSimulados+'%':'-';
+  document.getElementById('sConcursos').textContent=realizados.length;
+  
+  // Sub-estatísticas de resultados
+  const nAp = realizados.filter(c => c.resultado === 'aprovado').length;
+  const nCR = realizados.filter(c => c.resultado === 'cr').length;
+  const nRep = realizados.filter(c => c.resultado === 'reprovado').length;
+  const nElim = realizados.filter(c => c.resultado === 'eliminado').length;
+  const nAgu = realizados.filter(c => c.resultado === 'aguardando').length;
+  
+  document.getElementById('sConcursosDetalhes').innerHTML = `
+    ${nAp > 0 ? `<div class="stat-sub-row" style="color:var(--green)"><span class="stat-sub-num">${nAp}</span> Aprovação [VAGAS]</div>` : ''}
+    ${nCR > 0 ? `<div class="stat-sub-row" style="color:var(--yellow);text-shadow:0 0 8px rgba(255,215,0,0.3)"><span class="stat-sub-num">${nCR}</span> ${flexGenero('Classificado [CR]','Classificada [CR]')}</div>` : ''}
+    ${nRep > 0 ? `<div class="stat-sub-row" style="color:var(--red)"><span class="stat-sub-num">${nRep}</span> Reprovações</div>` : ''}
+    ${nElim > 0 ? `<div class="stat-sub-row" style="color:var(--red)"><span class="stat-sub-num">${nElim}</span> Eliminados</div>` : ''}
+    ${nAgu > 0 ? `<div class="stat-sub-row" style="color:var(--text)"><span class="stat-sub-num">${nAgu}</span> Aguardando Resultado</div>` : ''}
+  `;
+
+  document.getElementById('cntFoco').textContent=foco.length+' concurso'+(foco.length!==1?'s':'');
+  document.getElementById('cntMira').textContent=mira.length+' concurso'+(mira.length!==1?'s':'');
+  const gF=document.getElementById('gridFoco');
+  const gM=document.getElementById('gridMira');
+  if(!ativos.length){
+    gF.innerHTML=`<div class="empty-state"><div class="empty-icon">*</div><div class="empty-title">Nenhum concurso ainda</div><div class="empty-sub">Adicione seu primeiro concurso para comecar!</div></div>`;
+    gM.innerHTML='';
+  }else{
+    gF.innerHTML=(foco.length?foco.map(cardAtivo).join(''):`<div class="empty-state"><div class="empty-icon">*</div><div class="empty-title">Nada em foco total</div><div class="empty-sub">Mova para ca os concursos que você vai atacar agora.</div></div>`)+`<div class="add-card" onclick="goPage('cadastro_edital.html')"><div class="add-icon">+</div><div class="add-text">Novo concurso</div><div class="add-sub">Importe JSON ou cadastre manualmente</div></div>`;
+    gM.innerHTML=mira.length?mira.map(cardAtivo).join(''):`<div class="empty-state"><div class="empty-icon">*</div><div class="empty-title">Nenhum concurso na mira</div><div class="empty-sub">Use o botao dos cards ou arraste pelo topo para deixar oportunidades futuras aqui.</div></div>`;
+  }
+  setupContestDragAndDrop();
+  const secR=document.getElementById('secRealizados');
+  if(realizados.length){secR.style.display='';document.getElementById('gridRealizados').innerHTML=realizados.map(cardRealizado).join('');}
+  else secR.style.display='none';
+}
+function salvarOrganizacaoMeusConcursos(group, orderedIds){
+  const list = CT.getConcursos();
+  const groupSet = new Set(orderedIds.map(String));
+  list.forEach(c => {
+    if (groupSet.has(String(c.id))) c.grupoMeusConcursos = group;
+  });
+  orderedIds.forEach((id, idx) => {
+    const c = list.find(item => String(item.id) === String(id));
+    if (c) c.ordemMeusConcursos = idx + 1;
+  });
+  CT._set('ct_concursos', list);
+}
+function moverGrupoConcurso(id, targetGroup){
+  const list = CT.getConcursos();
+  const c = list.find(item => String(item.id) === String(id));
+  if (!c) return;
+  const nextGroup = targetGroup || (concursoGrupo(c) === 'mira' ? 'foco' : 'mira');
+  const nextOrder = Math.max(0, ...list.filter(item => !item.realizado && concursoGrupo(item) === nextGroup).map(concursoOrdem).filter(Number.isFinite)) + 1;
+  c.grupoMeusConcursos = nextGroup;
+  c.ordemMeusConcursos = Number.isFinite(nextOrder) ? nextOrder : 1;
+  CT._set('ct_concursos', list);
+  render();
+}
+let _contestDrag = null;
+function setupContestDragAndDrop(){
+  document.querySelectorAll('[data-contest-card]').forEach(card => {
+    const handle = card.querySelector('[data-drag-handle]');
+    if (!handle) return;
+    handle.addEventListener('mousedown', e => startContestPointerDrag(e, card));
+    handle.addEventListener('click', e => e.stopPropagation());
+  });
+}
+function startContestPointerDrag(e, card){
+  if (e.button !== 0 || _contestDrag) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const rect = card.getBoundingClientRect();
+  const placeholder = document.createElement('div');
+  placeholder.className = 'concurso-placeholder';
+  placeholder.style.width = rect.width + 'px';
+  placeholder.style.minHeight = rect.height + 'px';
+  const ghost = card.cloneNode(true);
+  ghost.classList.add('drag-ghost');
+  ghost.style.left = rect.left + 'px';
+  ghost.style.top = rect.top + 'px';
+  ghost.style.width = rect.width + 'px';
+  ghost.style.height = rect.height + 'px';
+  card.parentNode.insertBefore(placeholder, card);
+  card.classList.add('dragging');
+  card.style.display = 'none';
+  document.body.appendChild(ghost);
+  _contestDrag = {
+    card,
+    ghost,
+    placeholder,
+    offsetX: e.clientX - rect.left,
+    offsetY: e.clientY - rect.top,
+    lastZone: card.closest('.contest-drop-zone')
+  };
+  document.body.style.userSelect = 'none';
+  window.addEventListener('mousemove', moveContestPointerDrag);
+  window.addEventListener('mouseup', endContestPointerDrag, { once: true });
+  moveContestPointerDrag(e);
+}
+function moveContestPointerDrag(e){
+  if (!_contestDrag) return;
+  const d = _contestDrag;
+  d.ghost.style.left = (e.clientX - d.offsetX) + 'px';
+  d.ghost.style.top = (e.clientY - d.offsetY) + 'px';
+  const zone = getContestDropZoneAt(e.clientX, e.clientY) || d.lastZone;
+  if (!zone) return;
+  d.lastZone = zone;
+  const target = getContestInsertTarget(zone, e.clientX, e.clientY);
+  if (target && target !== d.placeholder) {
+    if (target.place === 'after') target.card.after(d.placeholder);
+    else zone.insertBefore(d.placeholder, target.card);
+  } else if (!target) {
+    const addCard = zone.querySelector('.add-card');
+    if (addCard) zone.insertBefore(d.placeholder, addCard);
+    else zone.appendChild(d.placeholder);
+  }
+}
+function endContestPointerDrag(){
+  if (!_contestDrag) return;
+  const d = _contestDrag;
+  const zone = d.placeholder.closest('.contest-drop-zone');
+  d.placeholder.replaceWith(d.card);
+  d.card.classList.remove('dragging');
+  d.card.style.display = '';
+  d.ghost.remove();
+  document.body.style.userSelect = '';
+  window.removeEventListener('mousemove', moveContestPointerDrag);
+  _contestDrag = null;
+  if (zone) {
+    const group = zone.dataset.contestGroup || 'foco';
+    const ids = Array.from(zone.querySelectorAll('[data-contest-card]')).map(card => card.dataset.contestId).filter(Boolean);
+    salvarOrganizacaoMeusConcursos(group, ids);
+  }
+  render();
+}
+function getContestDropZoneAt(x, y){
+  return Array.from(document.querySelectorAll('.contest-drop-zone')).find(zone => {
+    const box = zone.getBoundingClientRect();
+    return x >= box.left && x <= box.right && y >= box.top - 24 && y <= box.bottom + 24;
+  });
+}
+function getContestInsertTarget(zone, x, y){
+  const cards = Array.from(zone.querySelectorAll('[data-contest-card]:not(.dragging)'));
+  if (!cards.length) return null;
+  let nearest = null;
+  let best = Infinity;
+  cards.forEach(card => {
+    const box = card.getBoundingClientRect();
+    const cx = box.left + box.width / 2;
+    const cy = box.top + box.height / 2;
+    const rowWeight = Math.abs(y - cy) * 2.2;
+    const colWeight = Math.abs(x - cx);
+    const score = rowWeight + colWeight;
+    if (score < best) {
+      best = score;
+      nearest = { card, box };
+    }
+  });
+  if (!nearest) return null;
+  return { card: nearest.card, place: x > nearest.box.left + nearest.box.width / 2 ? 'after' : 'before' };
+}
+function abrirDash(id){sessionStorage.setItem('ct_concurso_ativo',id);goPage('dashboard.html');}
+function toggleStat(id,v){const c=CT.getConcurso(id);if(!c)return;c.contarEstatisticas=v;CT.saveConcurso(c);render();}
+function renderBackupInfo(){
+  const el=document.getElementById('backupInfo');
+  const nome=CT.getBackupNome().replace(/\.json$/i,'');
+  if(!el)return;
+  if(nome){
+    el.style.display='inline-flex';
+    el.style.cursor='pointer';
+    el.title='Clique para gerenciar perfis';
+    el.innerHTML=`<span>Perfil ativo:</span><strong>${nome}</strong>`;
+  }else{
+    el.style.display='none';
+    el.style.cursor='';
+    el.title='';
+    el.textContent='';
+  }
+}
+function resetErrosPerfil(){
+  ['perfilNomeErro','novoPerfilErro'].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display='none';
+    el.textContent='';
+  });
+}
+function escapeHtmlPerfil(value){
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+function escapeJsPerfil(value){
+  return String(value ?? '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+}
+function renderListaPerfis(items = [], ativoId = ''){
+  const list = document.getElementById('listaPerfis');
+  if (!list) return;
+  if (!items.length) {
+    list.innerHTML = `<div class="profile-empty">Nenhum perfil encontrado ainda.</div>`;
+    return;
+  }
+  list.innerHTML = items.map(profile => {
+    const ativo = profile.id === ativoId;
+    const concursos = Number(profile.total_concursos || 0);
+    const snapshots = Number(profile.total_snapshots || 0);
+    const nomeSeguro = escapeHtmlPerfil(profile.nome);
+    const idJs = escapeJsPerfil(profile.id);
+    const nomeJs = escapeJsPerfil(profile.nome);
+    const generoLabel = profile.genero === 'feminino' ? 'Feminino' : 'Masculino';
+    return `
+      <div class="profile-item ${ativo ? 'active' : ''}">
+        <div class="profile-item-main">
+          <div class="profile-item-name">
+            ${ativo ? '<span class="profile-pill">Ativo</span>' : '<span style="font-size:14px">Perfil</span>'}
+            <span>${nomeSeguro}</span>
+          </div>
+          <div class="profile-item-meta">
+            <span>${generoLabel}</span>
+            <span>${concursos} concurso${concursos === 1 ? '' : 's'}</span>
+            <span>${snapshots} backup${snapshots === 1 ? '' : 's'}</span>
+          </div>
+        </div>
+        <div class="profile-inline-actions">
+          <button class="profile-btn-small ${ativo ? '' : 'primary'}" type="button" ${ativo ? 'disabled' : `onclick="solicitarTrocaPerfil('${idJs}', '${nomeJs}')"`}>
+            ${ativo ? 'Perfil Atual' : 'Entrar'}
+          </button>
+          ${ativo ? '' : `<button class="profile-btn-small danger" type="button" onclick="solicitarExclusaoPerfil('${idJs}', '${nomeJs}')">Excluir</button>`}
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+async function carregarPerfisModal(){
+  const list = document.getElementById('listaPerfis');
+  if (list) list.innerHTML = `<div class="profile-empty">Carregando perfis...</div>`;
+  if (!(window.pywebview && window.pywebview.api && typeof window.pywebview.api.listar_perfis === 'function')) {
+    renderListaPerfis([], '');
+    return;
+  }
+  const res = await window.pywebview.api.listar_perfis();
+  if (res && res.ok) {
+    renderListaPerfis(res.profiles || [], res.ativo_id || '');
+  } else {
+    if (list) list.innerHTML = `<div class="profile-empty">Não foi possível carregar os perfis.</div>`;
+  }
+}
+function abrirModalPerfil(){
+  const overlay = document.getElementById('modalPerfil');
+  const input = document.getElementById('perfilNomeInput');
+  const nomeAtual = CT.getBackupNome().replace(/\.json$/i,'') || 'Perfil Principal';
+  const createInput = document.getElementById('novoPerfilInput');
+  if (!overlay || !input) return;
+  resetErrosPerfil();
+  input.value = nomeAtual;
+  _perfilGeneroAtual = generoAtualPerfil();
+  _novoPerfilGenero = 'masculino';
+  syncGeneroButtons('perfil', _perfilGeneroAtual);
+  syncGeneroButtons('novoPerfil', _novoPerfilGenero);
+  if (createInput) createInput.value = '';
+  overlay.classList.add('visible');
+  carregarPerfisModal();
+  setTimeout(() => {
+    input.focus();
+    input.select();
+  }, 40);
+}
+function fecharModalPerfil(){
+  const overlay = document.getElementById('modalPerfil');
+  if (overlay) overlay.classList.remove('visible');
+  resetErrosPerfil();
+}
+function exibirErroPerfil(msg, targetId='perfilNomeErro'){
+  const error = document.getElementById(targetId);
+  if (!error) return;
+  error.textContent = msg;
+  error.style.display = 'block';
+}
+async function confirmarRenomeacaoPerfil(){
+  const input = document.getElementById('perfilNomeInput');
+  const btn = document.getElementById('btnSalvarPerfilNome');
+  const nomeAtual = CT.getBackupNome().replace(/\.json$/i,'') || 'Perfil Principal';
+  const generoAtual = generoAtualPerfil();
+  if (!input || !btn) return;
+  const nomeLimpo = String(input.value || '').trim();
+  if (!nomeLimpo) {
+    exibirErroPerfil('O nome do perfil não pode ficar vazio.', 'perfilNomeErro');
+    input.focus();
+    return;
+  }
+  if (nomeLimpo.length > 80) {
+    exibirErroPerfil('O nome do perfil deve ter no máximo 80 caracteres.', 'perfilNomeErro');
+    input.focus();
+    return;
+  }
+  if (nomeLimpo === nomeAtual && _perfilGeneroAtual === generoAtual) {
+    fecharModalPerfil();
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Salvando...';
+  if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.atualizar_perfil_ativo === 'function') {
+    const res = await window.pywebview.api.atualizar_perfil_ativo(nomeLimpo, _perfilGeneroAtual);
+    if (res && res.ok) {
+      CT.setBackupNome(res.nome || nomeLimpo);
+      CT.setProfileGenero(res.genero || _perfilGeneroAtual);
+      renderBackupInfo();
+      await carregarPerfisModal();
+      fecharModalPerfil();
+      render();
+      CT.toast('Perfil atualizado com sucesso!', 'OK');
+    } else {
+      exibirErroPerfil('Não foi possível atualizar o perfil: ' + ((res && res.motivo) || 'erro desconhecido'), 'perfilNomeErro');
+    }
+    btn.disabled = false;
+    btn.textContent = 'Salvar Perfil';
+    return;
+  }
+
+  exibirErroPerfil('Não foi possível acessar a rotina de renomear perfil do app. Feche e abra novamente o Track Concursos para aplicar esta função.', 'perfilNomeErro');
+  btn.disabled = false;
+  btn.textContent = 'Salvar Perfil';
+}
+async function criarNovoPerfil(){
+  const input = document.getElementById('novoPerfilInput');
+  const btn = document.getElementById('btnCriarPerfil');
+  if (!input || !btn) return;
+  const nome = String(input.value || '').trim();
+  if (!nome) {
+    exibirErroPerfil('Informe um nome para o novo perfil.', 'novoPerfilErro');
+    input.focus();
+    return;
+  }
+  if (nome.length > 80) {
+    exibirErroPerfil('O nome do novo perfil deve ter no máximo 80 caracteres.', 'novoPerfilErro');
+    input.focus();
+    return;
+  }
+  btn.disabled = true;
+  btn.textContent = 'Criando...';
+  if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.criar_perfil === 'function') {
+    const res = await window.pywebview.api.criar_perfil(nome, _novoPerfilGenero);
+    if (res && res.ok) {
+      input.value = '';
+      resetErrosPerfil();
+      _novoPerfilGenero = 'masculino';
+      syncGeneroButtons('novoPerfil', _novoPerfilGenero);
+      await carregarPerfisModal();
+      CT.toast('Novo perfil criado com sucesso!', 'OK');
+    } else {
+      exibirErroPerfil('Não foi possível criar o perfil: ' + ((res && res.motivo) || 'erro desconhecido'), 'novoPerfilErro');
+    }
+  }
+  btn.disabled = false;
+  btn.textContent = 'Criar Perfil';
+}
+function confirmarTrocaPerfilVisual(nomePerfil){
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay visible';
+    overlay.innerHTML = `
+      <div class="modal-content report-modal profile-modal-card" style="max-width:560px">
+        <div class="profile-modal-head">
+          <div class="profile-modal-eyebrow">Troca de Perfil</div>
+          <div class="profile-modal-title">Entrar em "${nomePerfil}"?</div>
+          <div class="profile-modal-sub">Se houver alterações não salvas no perfil atual, salve antes de trocar para não perder nada.</div>
+        </div>
+        <div class="profile-modal-body" style="display:flex;flex-direction:column;gap:18px;padding:24px 28px 28px">
+          <div class="profile-modal-help">Escolha como deseja continuar com o perfil atual antes da troca.</div>
+          <div class="profile-actions-footer" style="justify-content:flex-end">
+            <button class="btn-modal secondary" type="button" id="perfilTrocaCancelar">Cancelar</button>
+            <button class="btn-modal secondary" type="button" id="perfilTrocaSemSalvar">Trocar sem Salvar</button>
+            <button class="btn-modal primary" type="button" id="perfilTrocaSalvar">Salvar e Trocar</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const finish = value => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.addEventListener('click', e => {
+      if (e.target === overlay) finish('cancel');
+    });
+    overlay.querySelector('#perfilTrocaCancelar').onclick = () => finish('cancel');
+    overlay.querySelector('#perfilTrocaSemSalvar').onclick = () => finish('discard');
+    overlay.querySelector('#perfilTrocaSalvar').onclick = () => finish('save');
+  });
+}
+function confirmarExclusaoPerfilVisual(nomePerfil){
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay visible';
+    overlay.innerHTML = `
+      <div class="modal-content report-modal profile-modal-card" style="max-width:580px">
+        <div class="profile-modal-head">
+          <div class="profile-modal-eyebrow">Excluir Perfil</div>
+          <div class="profile-modal-title">Excluir "${escapeHtmlPerfil(nomePerfil)}"?</div>
+          <div class="profile-modal-sub">Essa ação remove apenas os dados, backups e histórico desse perfil. Os demais perfis continuarão intactos.</div>
+        </div>
+        <div class="profile-modal-body" style="display:flex;flex-direction:column;gap:18px;padding:24px 28px 28px">
+          <div class="profile-modal-help">Por segurança, o perfil ativo não pode ser excluído e o app sempre mantém pelo menos um perfil disponível.</div>
+          <div class="profile-actions-footer" style="justify-content:flex-end">
+            <button class="btn-modal secondary" type="button" id="perfilExcluirCancelar">Cancelar</button>
+            <button class="btn-modal primary" type="button" id="perfilExcluirConfirmar" style="background:linear-gradient(135deg,#f55a5a,#d63939);box-shadow:0 10px 24px rgba(245,90,90,0.24)">Excluir Perfil</button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    const finish = value => {
+      overlay.remove();
+      resolve(value);
+    };
+    overlay.addEventListener('click', e => {
+      if (e.target === overlay) finish(false);
+    });
+    overlay.querySelector('#perfilExcluirCancelar').onclick = () => finish(false);
+    overlay.querySelector('#perfilExcluirConfirmar').onclick = () => finish(true);
+  });
+}
+async function solicitarTrocaPerfil(profileId, profileName){
+  if (!profileId) return;
+  let acao = 'discard';
+  if (window.CT && typeof CT.hasUnsavedChanges === 'function' && CT.hasUnsavedChanges()) {
+    acao = await confirmarTrocaPerfilVisual(profileName);
+    if (acao === 'cancel') return;
+    if (acao === 'save') {
+      const saveRes = await CT.autoBackup({ reason: 'antes-troca-perfil' });
+      if (!saveRes || !saveRes.ok) {
+        alert('Não foi possível salvar o perfil atual antes da troca.\n\nTente salvar as alterações e repetir.');
+        return;
+      }
+    }
+  }
+  if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.trocar_perfil_ativo === 'function') {
+    const res = await window.pywebview.api.trocar_perfil_ativo(profileId);
+    if (res && res.ok && res.conteudo) {
+      const importRes = await CT.importarBackup(res.conteudo, res.nome || profileName || 'Perfil');
+      if (importRes && importRes.ok) {
+        CT.setProfileGenero(res.genero || 'masculino');
+        render();
+        fecharModalPerfil();
+        await carregarPerfisModal();
+        CT.toast(`Agora você está no perfil "${res.nome || profileName}".`, 'OK');
+      } else {
+        alert('Não foi possível carregar os dados do perfil selecionado.');
+      }
+    } else {
+      alert('Não foi possível trocar de perfil: ' + ((res && res.motivo) || 'erro desconhecido'));
+    }
+  }
+}
+async function solicitarExclusaoPerfil(profileId, profileName){
+  if (!profileId) return;
+  const confirmar = await confirmarExclusaoPerfilVisual(profileName);
+  if (!confirmar) return;
+  if (!(window.pywebview && window.pywebview.api && typeof window.pywebview.api.excluir_perfil === 'function')) {
+    alert('A função de exclusão de perfil não está disponível nesta versão do app.');
+    return;
+  }
+  const res = await window.pywebview.api.excluir_perfil(profileId);
+  if (res && res.ok) {
+    await carregarPerfisModal();
+    CT.toast(`Perfil "${res.nome || profileName}" excluído com sucesso.`, 'OK');
+    return;
+  }
+  alert('Não foi possível excluir o perfil: ' + ((res && res.motivo) || 'erro desconhecido'));
+}
+document.getElementById('backupInfo').onclick=()=>{abrirModalPerfil();};
+document.getElementById('modalPerfil').addEventListener('click', e => {
+  if (e.target.id === 'modalPerfil') fecharModalPerfil();
+});
+document.getElementById('modalImportPremium').addEventListener('click', e => {
+  if (e.target.id === 'modalImportPremium') fecharModalImportPremium();
+});
+document.getElementById('modalPremiumSuccess').addEventListener('click', e => {
+  if (e.target.id === 'modalPremiumSuccess') fecharModalPremiumSuccess();
+});
+document.getElementById('modalDevToolsHub').addEventListener('click', e => {
+  if (e.target.id === 'modalDevToolsHub') fecharDevToolsHub();
+});
+document.getElementById('perfilNomeInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    confirmarRenomeacaoPerfil();
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    fecharModalPerfil();
+  }
+});
+document.getElementById('novoPerfilInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    criarNovoPerfil();
+  }
+});
+document.getElementById('btnImport').onclick=async ()=>{
+  if(window.pywebview && window.pywebview.api){
+    const confirmacao = await CT.confirm('Restaurar um backup de segurança vai substituir o estado atual do perfil principal.\n\nAntes da restauração, o app criará automaticamente um snapshot do estado atual para você poder voltar se precisar.\n\nDeseja continuar?', {
+      title: 'Restaurar backup',
+      confirmLabel: 'Restaurar',
+    });
+    if(!confirmacao) return;
+    (async () => {
+      if (window.CT && typeof CT.hasUnsavedChanges === 'function' && CT.hasUnsavedChanges()) {
+        const preSave = await CT.autoBackup({ reason: 'antes-restauracao' });
+        if (!preSave || !preSave.ok) {
+          alert('Não foi possível salvar um snapshot de segurança antes da restauração.\n\nTente salvar o perfil e repetir a operação.');
+          return;
+        }
+      }
+      return window.pywebview.api.selecionar_backup();
+    })().then(async res=>{
+      if(res && res.ok && res.caminho){
+        const restore = await window.pywebview.api.restaurar_backup_seguranca(res.caminho);
+        if(restore && restore.ok && restore.conteudo){
+          const result = await CT.importarBackup(restore.conteudo, restore.rotulo || 'Perfil Principal');
+          if(result.ok){ alert('Backup restaurado com sucesso!\n\nO estado anterior do perfil também foi guardado em um novo snapshot de segurança.'); render(); }
+          else alert('Erro ao restaurar: ' + result.erro);
+        } else if(restore && restore.motivo){
+          alert('Erro ao restaurar: ' + restore.motivo);
+        }
+      } else if(res && res.motivo && res.motivo !== 'cancelado'){
+        alert('Erro: ' + res.motivo);
+      }
+    });
+  } else {
+    document.getElementById('fileBackup').click();
+  }
+};
+document.getElementById('fileBackup').onchange=e=>{
+  const f=e.target.files[0];if(!f)return;
+  const r=new FileReader();
+  r.onload=async ev=>{const res=await CT.importarBackup(ev.target.result, 'Perfil Principal');if(res.ok){alert('Backup restaurado!');render();}else alert('Erro: '+res.erro);};
+  r.readAsText(f);
+};
+document.getElementById('filePremiumImport').onchange=e=>{
+  const f = e.target.files && e.target.files[0];
+  if (!f) return;
+  processarArquivoEditalPremium(f);
+};
+document.getElementById('premiumDropzone').addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    abrirSeletorEditalPremium();
+  }
+});
+['dragenter','dragover'].forEach(eventName => {
+  document.getElementById('premiumDropzone').addEventListener(eventName, e => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.classList.add('dragover');
+  });
+});
+['dragleave','drop'].forEach(eventName => {
+  document.getElementById('premiumDropzone').addEventListener(eventName, e => {
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.classList.remove('dragover');
+  });
+});
+document.getElementById('premiumDropzone').addEventListener('drop', e => {
+  const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
+  const file = files.find(item => /\.json$/i.test(item.name || '')) || files[0];
+  if (!file) {
+    definirErroImportPremium('Nenhum arquivo foi detectado no arrastar e soltar.');
+    return;
+  }
+  processarArquivoEditalPremium(file);
+});
+render();
+renderBackupInfo();
+atualizarEstadoImportPremium();
+function abrirRelatorio(id) {
+  const c = CT.getConcurso(id);
+  if (!c) return;
+  const q = CT.calcStats(CT.getQuestoes({ concursoId: id }));
+  const sess = CT.getSessoes({ concursoId: id });
+  const horas = CT.formatarTempo(CT.totalSegundos(sess));
+
+  const isAp = c.resultado === 'aprovado', isCR = c.resultado === 'cr', isAgu = c.resultado === 'aguardando', isRep = c.resultado === 'reprovado', isElim = c.resultado === 'eliminado';
+  const color = isAp ? 'var(--green)' : isCR ? 'var(--yellow)' : isAgu ? 'var(--text)' : isRep ? 'var(--red)' : 'var(--red)';
+  const bg = isAp ? 'rgba(62,207,142,0.1)' : isCR ? 'rgba(218,165,32,0.1)' : isAgu ? 'rgba(200,200,200,0.1)' : isRep ? 'rgba(245,90,90,0.1)' : 'rgba(245,90,90,0.1)';
+  const label = isAp ? resultadoTexto('aprovado_detalhe') : isCR ? resultadoTexto('cr') : isAgu ? resultadoTexto('aguardando') : isRep ? resultadoTexto('reprovado') : `Eliminado`;
+
+  const logoSrc = c.logoBase64 || (c.logoPath ? c.logoPath + '?t=' + Date.now() : null);
+  const logoS = logoSrc ? `<img src="${logoSrc}">` : `<div class="emoji">${c.logoEmoji || '🏛️'}</div>`;
+  const logoBg = logoSrc ? `<img src="${logoSrc}">` : `<div class="emoji-bg">${c.logoEmoji || '🏛️'}</div>`;
+
+  const temEstudo = CT.getMaterias(c.id).length > 0;
+
+  let detailsHtml = `
+    <div class="report-header">
+      <div class="report-logo-bg">${logoBg}</div>
+      <div class="report-title-row">
+        <div class="report-logo-circle">${logoS}</div>
+        <div class="report-main-info">
+          <div class="banca">${c.banca || 'BANCA NÃO INFORMADA'}</div>
+          <h2>${c.nome}</h2>
+          <div class="report-status-badge" style="background:${bg};color:${color};border:1px solid ${color}44">${label}</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="report-body">
+      <div class="report-grid">
+        <div class="report-card ${isAp || isCR ? 'gold' : isRep ? 'red' : ''}">
+          <div class="report-card-label">Colocação Final</div>
+          <div class="report-card-val">${c.colocacao ? c.colocacao + 'º' : '-'} <span style="font-size:14px;color:var(--text3);font-weight:400">/ ${c.totalCand || '-'} cand.</span></div>
+        </div>
+        <div class="report-card">
+          <div class="report-card-label">Pontuação Líquida</div>
+          <div class="report-card-val">${c.pontuacao != null ? c.pontuacao : '-'} <span style="font-size:14px;color:var(--text3);font-weight:400">${c.pontuacaoMax ? '/ ' + c.pontuacaoMax + ' max. ' : ''}${c.notaCorte ? '(Corte: ' + c.notaCorte + ')' : ''}</span></div>
+        </div>
+      </div>
+
+      <div class="report-stats-box">
+        <div style="font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:15px;letter-spacing:1px;text-align:center">Resumo da Prova</div>
+        <div class="report-stats-grid">
+          <div class="report-sub-stat"><div class="report-sub-label">Acertos</div><div class="report-sub-val" style="color:var(--green)">${c.certas || q.acertos || '-'}</div></div>
+          <div class="report-sub-stat"><div class="report-sub-label">Erros</div><div class="report-sub-val" style="color:var(--red)">${c.erradas || q.erros || '-'}</div></div>
+          <div class="report-sub-stat"><div class="report-sub-label">Brancos</div><div class="report-sub-val">${c.branco || '-'}</div></div>
+        </div>
+      </div>
+
+      ${c.redacao ? `
+      <div class="report-stats-box" style="margin-top:-20px; border-color:var(--accent2); background:rgba(124,92,252,0.03)">
+        <div class="report-stats-grid" style="grid-template-columns:1fr">
+          <div class="report-sub-stat" style="padding:10px">
+            <div class="report-sub-label" style="color:var(--accent2)">Nota da Redação / Discursiva</div>
+            <div class="report-sub-val" style="color:var(--accent2); font-size:32px">${c.redacao}</div>
+          </div>
+        </div>
+      </div>` : ''}
+
+      ${((c.coberto || 0) > 0 || (c.cobertoPre || 0) > 0) ? `
+      <div class="report-stats-box" style="margin-top:0px; border-color:var(--green); background:rgba(62,207,142,0.03)">
+         <div style="font-size:10px; font-weight:700; color:var(--green); text-transform:uppercase; letter-spacing:1px; margin-bottom:15px; text-align:center">Retrospectiva do Edital</div>
+         <div style="display:flex; justify-content:center; gap:60px">
+            ${(c.cobertoPre || 0) > 0 ? `<div style="text-align:center"><div style="font-size:28px; font-weight:700; color:var(--text); font-family:var(--mono)">${c.cobertoPre}x</div><div style="font-size:11px; color:var(--text3); text-transform:uppercase; margin-top:4px">Pré-edital coberto</div></div>` : ''}
+            ${(c.coberto || 0) > 0 ? `<div style="text-align:center"><div style="font-size:28px; font-weight:700; color:var(--green); font-family:var(--mono)">${c.coberto}x</div><div style="font-size:11px; color:var(--text3); text-transform:uppercase; margin-top:4px">Pós-edital coberto</div></div>` : ''}
+         </div>
+         <div style="text-align:center; margin-top:15px; font-size:12px; color:var(--text3); font-style:italic">Parabéns! Você concluiu o edital completo ${(c.coberto||0) + (c.cobertoPre||0)} vezes nestas etapas.</div>
+      </div>` : ''}
+
+      <div class="report-grid" style="grid-template-columns:repeat(2,1fr)">
+        <div class="report-card">
+          <div class="report-card-label">Horas Estudadas</div>
+          <div class="report-card-val">${horas}</div>
+        </div>
+        <div class="report-card">
+          <div class="report-card-label">Questões Feitas</div>
+            <div class="report-card-val">${c.questoesTotal || q.resolvidas || '-'} <span style="font-size:14px;color:${pctColor(q.pct)}">(${q.pct || '0'}%)</span></div>
+        </div>
+      </div>
+
+      ${c.obs ? `<div class="obs-box"><label>Observações do Candidato</label>${c.obs}</div>` : ''}
+      
+      ${(isAp || isCR) ? `
+       <div style="margin-top:24px;background:${(c.nomeado && c.nomeado.ativo)?'rgba(76,161,255,0.1)':'var(--bg3)'};border:1px solid ${(c.nomeado && c.nomeado.ativo)?'#4ca1ff':'var(--border)'};border-radius:12px;padding:20px;display:flex;align-items:center;justify-content:space-between">
+         <div>
+           <div style="font-size:14px;font-weight:700;color:${(c.nomeado && c.nomeado.ativo)?'#4ca1ff':'var(--text2)'}">${resultadoTexto('foi_nomeado')}</div>
+           <div style="font-size:12px;color:var(--text3);margin-top:4px">Adicione a faixa da vitória no seu card.</div>
+         </div>
+         <button onclick="toggleNomeado('${c.id}')" style="padding:8px 16px;border-radius:8px;font-weight:600;font-size:12px;cursor:pointer;border:none;background:${(c.nomeado && c.nomeado.ativo)?'#f55a5a':'#4ca1ff'};color:#fff">
+            ${(c.nomeado && c.nomeado.ativo)?resultadoTexto('remover_nomeacao'):resultadoTexto('fui_nomeado')}
+         </button>
+       </div>
+      ` : ''}
+    </div>
+
+    <div class="report-footer">
+      <button class="btn-modal secondary" onclick="fecharModalDetalhes()">Fechar</button>
+      <div style="display:flex;gap:12px">
+        ${(c.cobertoPre || 0) > 0 ? `<button class="btn-modal secondary" onclick="abrirDash('${c.id}')" title="Ver estatísticas filtradas por Pré-edital">Verificar Concurso Pré-edital</button>` : ''}
+        ${temEstudo ? `<button class="btn-modal primary" onclick="abrirDash('${c.id}')">Verificar Concurso Pós-edital</button>` : ''}
+      </div>
+    </div>
+  `;
+
+  document.getElementById('modalBody').innerHTML = detailsHtml;
+  document.getElementById('modalDetalhes').classList.add('visible');
+}
+
+function fecharModalDetalhes() {
+  const el = document.getElementById('modalDetalhes');
+  if (el) el.classList.remove('visible');
+}
+
+async function toggleNomeado(id) {
+  const c = CT.getConcurso(id);
+  if (!c) return;
+  if (c.nomeado && c.nomeado.ativo) {
+    if (await CT.confirm(`Remover a faixa de ${resultadoTexto('nomeado').toLowerCase()} deste concurso?`, {
+      title: 'Remover faixa',
+      confirmLabel: 'Remover',
+    })) {
+       c.nomeado = { ativo: false };
+       CT.saveConcurso(c);
+       fecharModalDetalhes();
+       render();
+    }
+  } else {
+    const data = await CT.prompt(`Parabéns! Qual foi a data da ${resultadoTexto('nomeado').toLowerCase()}? (Opcional, deixe em branco se não quiser informar)`); // [R16] prompt() nativo → CT.prompt modal (Electron lança "prompt() is not supported.")
+    if (data !== null) {
+       c.nomeado = { ativo: true, data: data.trim() };
+       CT.saveConcurso(c);
+       fecharModalDetalhes();
+       render();
+    }
+  }
+}
+

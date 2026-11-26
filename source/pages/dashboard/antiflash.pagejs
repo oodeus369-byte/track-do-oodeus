@@ -1,0 +1,20 @@
+/**
+ * Track do Oodeus - [R9-port] mini-script anti-flash do <head> de
+ * dashboard.html (original 12-18 + 1 seam __CT_PAGE_HASH__, ver mais abaixo).
+ * No original, roda ANTES do primeiro paint: se o hash casa
+ * ^#flashcards(:|$) ou sessionStorage.ct_dashboard_tab === 'flashcards',
+ * adiciona ct-initial-flashcards no <html> (o CSS inline esconde o overview
+ * e mostra a aba flashcards antes do primeiro paint). No plugin, roda como
+ * 2º script da cadeia da página (por render, síncrono — sem paint entre o
+ * inject do body e a cadeia). Seam único [R9-port]: location.hash é do app
+ * Obsidian, não da página → window.__CT_PAGE_HASH__ (exposto pelo shell por
+ * render, análogo a __CT_PAGE_SEARCH__); em browser puro, fallback original.
+ */
+    (function () {
+      try {
+        var pageHash = typeof window.__CT_PAGE_HASH__ === 'string' ? window.__CT_PAGE_HASH__ : String(location.hash || ''); // [R9-port] seam do shell (plugin); fallback original em browser puro
+        var wantsFlashcards = /^#flashcards(?::|$)/.test(pageHash)
+          || sessionStorage.getItem('ct_dashboard_tab') === 'flashcards';
+        if (wantsFlashcards) document.documentElement.classList.add('ct-initial-flashcards');
+      } catch (e) {}
+    })();

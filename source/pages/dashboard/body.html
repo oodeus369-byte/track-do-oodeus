@@ -1,0 +1,358 @@
+<!-- Track do Oodeus — [R9-port] body de dashboard.html (linhas 1986-2332 do
+     original www/dashboard.html). Adaptações: onclick de navegação
+     location.href → goPage (7 pontos: logo 1989 + nav-items 1993/1996/1997/
+     2000/2001/2002; os itens Dashboard #navDashboardOverview e Flashcards
+     #navFlashcardsDashboard usam showDashTab — verbatim, global exposto pelo
+     flashcards.js, que roda antes do script principal); <a href="ajuda.html">
+     (2008) recebe onclick goPage + return false (precedente aba-materia/R7).
+     <img src="assets/…"> mantém o caminho relativo do original — o shell
+     reescreve na renderização. Os 2 modais estáticos (#modalMerge e
+     #modalPreEditalReset) continuam ANINHADOS dentro do <aside> da sidebar
+     — posição real do DOM (etapa-04 §1, anomalia a replicar). -->
+  <aside class="sidebar">
+    <div class="sidebar-logo">
+      <img src="assets/Track Concursos logo.png" alt="Track Concursos" class="brand-logo"
+        onclick="goPage('concursos.html')">
+    </div>
+    <nav class="nav">
+      <div class="nav-label">Menu</div>
+      <div class="nav-item" onclick="goPage('concursos.html')" style="cursor:pointer"><span class="icon"><img src="assets/michel-m-icon.png" alt="" style="width:18px;height:18px;object-fit:contain;display:block"></span>
+        Meus Concursos</div>
+      <div class="nav-item active" id="navDashboardOverview" onclick="showDashTab('overview')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="dashboard" aria-hidden="true"></span> Dashboard</div>
+    <div class="nav-item" id="navCronogramaInteligente" onclick="goPage('cronograma_inteligente.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="cronograma" aria-hidden="true"></span> Cronograma Inteligente</div>
+      <div class="nav-item" onclick="goPage('revisoes.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="revisoes" aria-hidden="true"></span>
+        Revisões <span class="nav-badge" id="revBadge" style="display:none">0</span></div>
+      <div class="nav-item" id="navFlashcardsDashboard" onclick="showDashTab('flashcards')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="flashcards" aria-hidden="true"></span> Flashcards <span class="nav-badge" id="flashTabBadge" style="display:none">0</span></div>
+      <div class="nav-item" onclick="goPage('historico.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="historico" aria-hidden="true"></span>
+        Métricas</div>
+      <div class="nav-item" onclick="goPage('simulados.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="simulados" aria-hidden="true"></span>
+        Simulados</div>
+      <div class="nav-item" onclick="goPage('ajuda.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="ajuda" aria-hidden="true"></span>
+        Ajuda</div>
+    </nav>
+    <div style="margin:0 12px 8px;text-align:center">
+      <a href="ajuda.html" onclick="goPage('ajuda.html');return false" style="text-decoration:none">
+        <div style="font-size:12px;color:var(--text3);line-height:1.6">
+          <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Desenvolvido por <img src="assets/logoMichelSoftwares.png?v=1" alt="Michel Softwares" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>
+          <span style="opacity:0.7">powered by Antigravity Gemini</span>
+        </div>
+      </a>
+    </div>
+    <div id="modalMerge" class="modal-overlay">
+      <div class="modal-content report-modal" style="max-width:860px">
+        <div class="modal-close-btn" onclick="fecharModalMerge()">✕</div>
+        <div class="report-header">
+          <div class="report-main-info">
+            <div id="modalLabel"
+              style="font-size:12px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">
+              ✦ Informações do Concurso</div>
+            <h2 id="mergeContestName">Concurso</h2>
+            <p id="modalDesc" style="color:var(--text3);font-size:13px;margin-top:8px;line-height:1.5">Gerencie os dados
+              e estatísticas deste certame.</p>
+          </div>
+        </div>
+        <div class="report-body" style="display:flex;flex-direction:column;gap:18px">
+          <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px">
+            <div class="report-card">
+              <div class="report-card-label">Banca</div>
+              <input id="infoBanca" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:11px 12px;font-family:var(--sans);font-size:14px;outline:none">
+            </div>
+            <div class="report-card">
+              <div class="report-card-label">Quantidade de vagas</div>
+              <input id="infoVagas" type="text" placeholder="Ex: 20 vagas imediatas + 50 CR" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:11px 12px;font-family:var(--sans);font-size:14px;outline:none">
+            </div>
+            <div class="report-card">
+              <div class="report-card-label">Data da prova</div>
+              <input id="infoDataProva" type="date" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:11px 12px;font-family:var(--sans);font-size:14px;outline:none">
+            </div>
+            <div class="report-card">
+              <div class="report-card-label">Local da prova</div>
+              <input id="infoLocalProva" placeholder="Ex: Maceió — AL" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:11px 12px;font-family:var(--sans);font-size:14px;outline:none">
+            </div>
+          </div>
+          <div class="report-card">
+            <div class="report-card-label">Cargo do concurso</div>
+            <input id="infoCargo" placeholder="Cargo / área" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:11px 12px;font-family:var(--sans);font-size:14px;outline:none">
+            <div class="report-card-label" style="margin-top:12px">Salário</div>
+            <input id="infoSalario" placeholder="Digite e salve o salário" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:11px 12px;font-family:var(--sans);font-size:14px;outline:none">
+          </div>
+          <div class="report-card">
+            <div class="report-card-label">Link do edital</div>
+            <input id="infoLinkEdital" placeholder="https://..." title="Segure Ctrl e clique para abrir o link" style="width:100%;background:var(--bg2);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:11px 12px;font-family:var(--sans);font-size:14px;outline:none">
+            <div class="info-link-hint">Segure Ctrl e clique no campo para abrir o edital.</div>
+          </div>
+          <div class="report-card">
+            <div class="report-card-label">Observações personalizadas</div>
+            <textarea id="infoObs" rows="4" placeholder="Anotações, cortes anteriores, estratégia, lembretes..." style="width:100%;resize:vertical;background:var(--bg2);border:1px solid var(--border);border-radius:10px;color:var(--text);padding:11px 12px;font-family:var(--sans);font-size:14px;line-height:1.5;outline:none"></textarea>
+          </div>
+          <div style="display:flex;justify-content:flex-end">
+            <button class="btn-modal primary" onclick="salvarInfoConcursoDashboard()">Salvar informações</button>
+          </div>
+          <div id="exportTemplateInlineCard" class="report-card" style="margin-top:8px;display:block">
+            <label style="display:flex;align-items:center;gap:10px;color:var(--text2);font-size:13px;font-weight:600;cursor:pointer">
+              <input id="chkExportIncludeLinksInline" type="checkbox" checked>
+              Incluir links dos materiais
+            </label>
+          </div>
+          <div id="fusionToolCard" class="report-card">
+            <div class="report-card-label">J&aacute; realizou a prova desse concurso?</div>
+            <div style="font-size:12px;color:var(--text3);line-height:1.45;margin-bottom:10px">Se sim, fusione as estat&iacute;sticas deste pr&eacute;-edital com o card de Concurso J&aacute; Realizado correspondente.</div>
+            <select id="selectDestino" onchange="verificarMerge()"
+              style="background:var(--bg2);border:1px solid var(--border);color:var(--text);padding:12px;width:100%;border-radius:10px;font-family:var(--sans);font-size:14px;outline:none">
+              <option value="">Selecione para onde enviar estes dados...</option>
+            </select>
+          </div>
+          <div id="mergePreview"
+            style="margin-top:15px;display:none;background:rgba(255,165,0,0.05);padding:15px;border-radius:10px;border:1px solid var(--orange)">
+            <div
+              style="font-size:12px;font-weight:700;color:var(--orange);margin-bottom:5px;display:flex;align-items:center;gap:6px">
+              ⚠️ ATENÇÃO</div>
+            <div style="font-size:12px;color:var(--text3);line-height:1.4">As <b>horas estudadas</b> e <b>questões</b>
+              deste Pré-Edital serão somadas ao concurso selecionado. Este card de Pré-Edital será EXCLUÍDO
+              permanentemente após a fusão.</div>
+          </div>
+        </div>
+        <div class="report-footer" style="justify-content:space-between">
+          
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button id="btnExportTemplate" class="btn-modal secondary" onclick="exportarTemplateDoModal()" style="display:inline-flex">Exportar Template</button>
+            <button id="btnExportCardImage" class="btn-modal secondary" onclick="exportarImagemCardDoModal()" style="display:inline-flex">Exportar imagem do card</button>
+          </div>
+<div style="display:flex;gap:12px">
+            <button class="btn-modal secondary" onclick="fecharModalMerge()">Fechar</button>
+            <button class="btn-modal primary" id="btnConfirmMerge" disabled onclick="executarMerge()">Confirmar e
+              Fusionar</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="modalPreEditalReset" class="modal-overlay" onclick="if(event.target===this) fecharModalPreEditalReset()">
+      <div class="modal-content report-modal pre-reset-modal-card">
+        <div class="modal-close-btn" onclick="fecharModalPreEditalReset()">✕</div>
+        <div class="pre-reset-hero">
+          <div class="pre-reset-chip">✦ Cobertura concluída</div>
+          <div class="pre-reset-title">Parabéns pela nova cobertura do edital</div>
+          <div class="pre-reset-copy">
+            Você concluiu 100% dos tópicos deste pré-edital e registrou mais uma cobertura completa.
+            Se quiser começar um novo ciclo agora, o Track Concursos pode reiniciar apenas as marcações de estudo,
+            sem apagar horas, questões, simulados ou o seu histórico.
+          </div>
+        </div>
+        <div class="pre-reset-body">
+          <div class="pre-reset-highlight">
+            <img src="assets/mascots/pre-edital-rocket.gif" alt="Foguete do pré-edital">
+            <div>
+              <strong id="preResetHighlightTitle">Cobertura atual ×1</strong>
+              <span>Ao reiniciar, os tópicos voltam a ficar desmarcados para você começar uma nova passada pelo edital com tudo limpo visualmente.</span>
+            </div>
+          </div>
+          <div class="pre-reset-benefits">
+            <div class="pre-reset-benefit"><span>✓</span><div>Suas estatísticas e registros continuam preservados.</div></div>
+            <div class="pre-reset-benefit"><span>✓</span><div>O contador de cobertura permanece salvo no concurso.</div></div>
+            <div class="pre-reset-benefit"><span>✓</span><div>Ao confirmar, o foguete entra em cena para marcar o início do novo ciclo.</div></div>
+          </div>
+        </div>
+        <div class="pre-reset-actions">
+          <button class="btn-modal secondary" onclick="fecharModalPreEditalReset()">Agora não</button>
+          <button class="btn-modal primary" onclick="confirmarReinicioPreEdital()">Reiniciar edital</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-concurso" id="sideCard">
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <div id="sideLogoImg"
+          style="width:56px;height:56px;border-radius:10px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:28px;flex-shrink:0;overflow:hidden">
+          📋</div>
+        <div style="min-width:0">
+          <div class="concurso-nome" id="sideNome">—</div>
+          <div class="concurso-banca" id="sideBanca">—</div>
+        </div>
+      </div>
+      <div class="timer-box">
+        <div class="timer-num" id="sideTimer">—</div>
+        <div class="timer-label" id="sideTimerLabel">dias para a prova</div>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="page-header fade-in">
+      <div>
+        <div class="page-title" id="dashTitle">Dashboard</div>
+        <div class="page-subtitle" id="dashSub">Carregando...</div>
+      </div>
+      <div class="header-date" id="dashDate">—</div>
+    </div>
+
+    <div id="dashboardOverview">
+    <div id="bannerExamDay" class="banner-exam-day">
+      <div class="banner-icon">🎯</div>
+      <div class="banner-content">
+        <div class="banner-title">Sua Batalha foi Realizada! ⚔️</div>
+        <div class="banner-text">Chegou o momento de colher os frutos de sua dedicação. Finalize agora este edital para
+          salvá-lo em suas métricas e registrar seu desempenho.</div>
+      </div>
+      <button class="banner-btn" onclick="finalizarBatalhaAutomatico()">Finalizar Batalha</button>
+    </div>
+    <div class="stats-grid">
+      <div class="stat-card blue fade-in">
+        <div class="stat-main"><span class="stat-icon tc-stat-icon" data-stat-icon="timer" aria-hidden="true"></span><div class="stat-value" id="sHoras">—</div></div>
+        <div class="stat-label">Horas estudadas</div>
+      </div>
+      <div class="stat-card purple fade-in">
+        <div class="stat-main"><span class="stat-icon tc-stat-icon" data-stat-icon="questions" aria-hidden="true"></span><div class="stat-value" id="sQuestoes">—</div></div>
+        <div class="stat-label">Questões resolvidas</div>
+      </div>
+      <div class="stat-card green fade-in">
+        <div class="stat-main"><span class="stat-icon tc-stat-icon" data-stat-icon="target-color" aria-hidden="true"></span><div class="stat-value" id="sAcertos">—</div></div>
+        <div class="stat-label">Taxa de acertos</div>
+      </div>
+      <div class="stat-card orange fade-in">
+        <div class="stat-main"><span class="stat-icon tc-stat-icon" data-stat-icon="file-list" aria-hidden="true"></span><div class="stat-value" id="sSimulado">—</div></div>
+        <div class="stat-label">Último Simulado</div>
+        <div id="sSimMedia"
+          style="font-size:11px;color:var(--text3);margin-top:6px;font-weight:500;text-transform:lowercase">média em
+          todos: —</div>
+      </div>
+      <div class="stat-card yellow fade-in">
+        <div class="stat-main"><span class="stat-icon tc-stat-icon" data-stat-icon="task" aria-hidden="true"></span><div class="stat-value" id="sTopicos">—</div></div>
+        <div class="stat-label">Tópicos concluídos</div>
+        <div id="sSubtopicos" style="font-size:11px;color:var(--text3);margin-top:6px;font-weight:500">Subtópicos: -</div>
+      </div>
+    </div>
+    <div class="alert-section fade-in" id="alertSection" style="display:none">
+      <div class="alert-header">
+        <div class="alert-dot"></div>
+        <div class="alert-title">Revisões pendentes</div>
+      </div>
+      <div class="alert-tags" id="alertTags"></div>
+    </div>
+    <div class="lower-grid">
+      <div class="table-card fade-in dashboard-materias-card">
+        <div class="card-header">
+          <div>
+            <div class="card-title">Matérias</div>
+            <div class="card-sub">Clique para ver os tópicos</div>
+          </div>
+          <button onclick="abrirModalAddMateriaDash()"
+            style="padding:5px 12px;border:1px solid var(--border2);border-radius:7px;background:transparent;color:var(--text3);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s"
+            onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
+            onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--text3)'">＋ Adicionar
+            matéria</button>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th>Matéria</th>
+              <th>Revisão</th>
+              <th>Tempo</th>
+              <th>Acertos</th>
+              <th>Progresso</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody id="materiasTbody">
+            <tr>
+              <td colspan="6" style="text-align:center;color:var(--text3);padding:24px">Carregando...</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="history-card fade-in dashboard-crono-card">
+        <div class="card-header">
+          <div class="card-title">📅 Cronograma semanal</div>
+          <button onclick="abrirModalCrono()"
+            style="padding:4px 12px;border:1px solid var(--border2);border-radius:6px;background:transparent;color:var(--text3);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer">✏️
+            Editar</button>
+        </div>
+        <div id="cronoGrid" style="display:flex;flex-direction:column;gap:4px;padding:10px"></div>
+        <!-- FAIXA DO CONCURSEIRO -->
+        <div id="faixaSection" class="dash-user-tier" style="padding:0 10px 12px">
+          <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;flex-direction:column;gap:8px">
+            <!-- Linha principal: emoji + faixa + dias -->
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <div id="faixaEmoji" style="font-size:26px;line-height:1;flex-shrink:0">🤍</div>
+              <div style="flex:1;min-width:0">
+                <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+                  <span id="faixaNome" style="font-size:13px;font-weight:700;color:var(--text)">Faixa Branca</span>
+                  <span style="color:var(--text3);font-size:12px">|</span>
+                  <span id="faixaSemanas" style="font-size:12px;color:var(--text2);font-weight:600"></span>
+                </div>
+              </div>
+            </div>
+            <!-- Frase motivacional -->
+            <div id="faixaFrase"
+              role="button" tabindex="0" onclick="abrirEditorFaixaFrase()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirEditorFaixaFrase()}"
+              title="Clique para editar sua frase"
+              style="font-size:13px;color:var(--text2);line-height:1.75;font-style:italic;font-weight:500;letter-spacing:0.1px;padding:10px 12px;background:rgba(255,255,255,0.03);border-radius:8px;border-left:3px solid var(--accent2);text-shadow:0 1px 0 rgba(0,0,0,0.18);cursor:pointer;transition:border-color .16s ease,background .16s ease,transform .16s ease">
+            </div>
+            <!-- Sequencia diaria notification -->
+            <div id="semanaCompletaBox"
+              style="display:none;background:rgba(62,207,142,0.1);border:1px solid rgba(62,207,142,0.3);border-radius:8px;padding:9px 12px;align-items:center;gap:8px">
+              <div style="font-size:18px">🎉</div>
+              <div>
+                <div style="font-size:12px;font-weight:700;color:var(--green)">Sequencia diaria!</div>
+                <div style="font-size:11px;color:var(--text3)" id="semanaMsg"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="bottom-grid">
+      <div class="table-card fade-in dashboard-weekly-card">
+        <div class="card-header">
+          <div class="card-title">📊 Estudo semanal - semana atual</div>
+        </div>
+        <div style="padding:12px 16px">
+          <div id="weeklyChartSub" class="card-sub" style="margin-bottom:10px">Domingo a sábado</div>
+          <canvas id="chartSemanal" height="130" style="display:none"></canvas>
+          <div id="weeklyChartsGrid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px;align-items:stretch">
+            <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:14px;padding:14px;min-height:280px;display:flex;flex-direction:column">
+              <div style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:2px">Horas estudadas</div>
+              <div style="font-size:11px;color:var(--text3);margin-bottom:10px" id="weeklyHoursSub">Distribuição por matéria na semana</div>
+              <div style="position:relative;height:180px">
+                <canvas id="chartSemanalHoras"></canvas>
+              </div>
+              <div id="weeklyHoursLegend" style="display:flex;flex-direction:column;gap:8px;margin-top:14px"></div>
+            </div>
+            <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:14px;padding:14px;min-height:280px;display:flex;flex-direction:column">
+              <div style="font-size:13px;font-weight:800;color:var(--text);margin-bottom:2px">Questões feitas</div>
+              <div style="font-size:11px;color:var(--text3);margin-bottom:10px" id="weeklyQuestionsSub">Total semanal entre acertos e erros</div>
+              <div style="position:relative;height:180px">
+                <canvas id="chartSemanalQuestoes"></canvas>
+              </div>
+              <div id="weeklyQuestionsLegend" style="display:flex;flex-direction:column;gap:8px;margin-top:14px"></div>
+            </div>
+          </div>
+          <div id="weeklyDaysStrip" style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:10px;margin-top:14px"></div>
+        </div>
+      </div>
+
+      <div class="dashboard-side-stack" style="display:flex;flex-direction:column;gap:20px">
+        <!-- PAINEL DA PROVA -->
+        <div class="table-card fade-in" id="cardProva" style="cursor:pointer; transition: transform 0.2s"
+          onclick="abrirModalConfigProva()">
+          <div class="card-header" style="background:rgba(255,255,255,0.02)">
+            <div>
+              <div class="card-title">🧭 Painel da Prova</div>
+              <div class="card-sub">Configuração completa do edital</div>
+            </div>
+            <div class="prova-score-badge" id="dashNotaMax">Nota Máx: 0</div>
+          </div>
+          <div id="dashProvaResumo" style="max-height:400px;overflow-y:auto">
+            <!-- Renderizado via JS -->
+            <div style="padding:40px 20px;text-align:center;color:var(--text3);font-size:12px;opacity:0.8">Clique aqui
+              para configurar as questões, pesos e blocos da sua prova.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <section id="dashboardFlashcards" style="display:none">
+      <div id="flashcardsDashboardRoot"></div>
+    </section>
+  </main>

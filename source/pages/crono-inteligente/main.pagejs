@@ -1,0 +1,3404 @@
+/**
+ * Track do Oodeus - [R7-port] script principal de cronograma_inteligente.html
+ * (verbatim, linhas 973-4336 do original www/cronograma_inteligente.html).
+ * Script inline CLÁSSICO top-level, SEM IIFE e SEM 'use strict' (como o
+ * original); o wrapper do shell (render-util.runPageScripts, estande 1) faz a
+ * ponte de nomes para window — os onclick inline enxergam as funções e as
+ * let/const top-level via accessors.
+ *
+ * Boot no fim do arquivo (verbatim): config = loadConfig(); render(); +
+ * listener 'storage' para chaves ct_ + export window.closeCalendarDay.
+ *
+ * CORREÇÕES decididas pelo Oodeus (2026-11-13, spec etapa-09 §Etapa-14) —
+ * "eliminado ou tornado real" na reconstrução:
+ *   D1 (orig 1546-1548): branch morto do sinal 'queda' REMOVIDO (inalcançável).
+ *   D2 (orig 2455): wizard mostra as horas JÁ SALVAS (flag setupHoursModified
+ *       inerte; as atribuições dela em 1133/2771/2824 ficam verbatim).
+ *   D3 (orig 2719-2726): collectSetupAvailability sem leituras dos IDs
+ *       FANTASMA #setupRitmo/#setupQuestoes (não existem no DOM) — fallbacks
+ *       diretos.
+ *
+ * Seam único (navegação): onclick inline 'cadastro_edital.html' (orig 3701) →
+ * goPage local (delega a window.__CT_NAV_GO_PAGE do nav.js; fallback
+ * location.href original — padrão script1.pagejs do cadastro).
+ *
+ * Ordem de carregamento do original: data.js (971) → este script (972) →
+ * crono-cycle.js (4338) → nav.js (4339). No plugin: data.js roda no onload;
+ * nav boot ANTES da cadeia (desvio documentado no render-util R3); cadeia =
+ * [este script, crono-cycle.pagejs]. O CI NÃO carrega timer-popup.js (o
+ * original também não) — openCycleTimer sai cedo sem #timerPopup (guard do
+ * próprio original); initDashboard do crono-cycle sai cedo sem #cronoGrid.
+ * Config: chave ct_cronograma_inteligente_<cid>; DEFAULT_CONFIG (984-1001);
+ * collectConfigFromUi zera revisaoPct/questoesPct (D4, 1096-1097) — vivos.
+ */
+// [R7-port] Navegação entre páginas (mesmo contrato do goPage do nav.js).
+function goPage(dest) {
+  if (window.__CT_NAV_GO_PAGE) { window.__CT_NAV_GO_PAGE(dest); return; }
+  if (window.__CT_HOST__ && typeof window.__CT_HOST__.navigate === 'function' && window.__CT_HOST__.navigate(dest)) return;
+  window.location.href = dest;
+}
+const cId = sessionStorage.getItem('ct_concurso_ativo') || '';
+const DAY_LABELS = [
+  { key:'seg', label:'Seg' },
+  { key:'ter', label:'Ter' },
+  { key:'qua', label:'Qua' },
+  { key:'qui', label:'Qui' },
+  { key:'sex', label:'Sex' },
+  { key:'sab', label:'Sáb' },
+  { key:'dom', label:'Dom' }
+];
+const JS_DAY_TO_KEY = ['dom','seg','ter','qua','qui','sex','sab'];
+const DEFAULT_CONFIG = {
+  tipo: '',
+  cicloModo: 'sugerido',
+  agendadoSetupDone: false,
+  agendadoSetupStep: 1,
+  materiasSelecionadas: {},
+  materiaAfinidade: {},
+  materiaPrioridades: {},
+  ritmo: 'equilibrado',
+  horas: { seg: 2, ter: 2, qua: 2, qui: 2, sex: 2, sab: 0, dom: 0 },
+  revisaoPct: 25,
+  questoesPct: 20,
+  minutosTopico: 60,
+  minutosSubtopico: 40,
+  maxTopicosDia: 0,
+  focusAlertsCustomEnabled: false,
+  focusAlertsCustomGoal: 80
+};
+let config = null;
+let state = null;
+let calendarMonthOffset = 0;
+let setupHoursModified = false;
+let priorityEditorDraft = {};
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, ch => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[ch]));
+}
+
+function configKey() {
+  return 'ct_cronograma_inteligente_' + cId;
+}
+
+function persistCronogramaConfig(reason = 'cronograma-inteligente', options = {}) {
+  if (!cId) return;
+  localStorage.setItem(configKey(), JSON.stringify(config));
+  if (!window.CT) return;
+  const saveReason = reason || 'cronograma-inteligente';
+  if (options.immediate && typeof CT.autoBackup === 'function') {
+    if (typeof CT.isSaveInProgress === 'function' && CT.isSaveInProgress()) {
+      const wait = typeof CT.waitForActiveSave === 'function' ? CT.waitForActiveSave() : Promise.resolve();
+      wait.finally(() => {
+        if (typeof CT.queueAutoSave === 'function') {
+          CT.queueAutoSave(saveReason, { delay: 200, toast: options.toast === true });
+        }
+      });
+      return;
+    }
+    CT.autoBackup({ reason: saveReason }).catch(() => {});
+    return;
+  }
+  if (typeof CT.queueAutoSave === 'function') {
+    CT.queueAutoSave(saveReason, { delay: options.delay ?? 500, toast: options.toast === true });
+  }
+}
+
+function readJson(key, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function clampNumber(value, min, max, fallback) {
+  const n = Number(String(value ?? '').replace(',', '.'));
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, n));
+}
+
+function normalizeFocusCustomGoalValue(value, fallback = DEFAULT_CONFIG.focusAlertsCustomGoal) {
+  const raw = String(value ?? '').replace(/\D/g, '');
+  const n = parseInt(raw, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(99, Math.max(66, n));
+}
+
+function loadConfig() {
+  const saved = readJson(configKey(), {});
+  return {
+    ...DEFAULT_CONFIG,
+    ...saved,
+    tipo: saved.tipo || '',
+    cicloModo: saved.cicloModo || 'sugerido',
+    agendadoSetupDone: !!saved.agendadoSetupDone,
+    agendadoSetupStep: clampNumber(saved.agendadoSetupStep, 1, 4, 1),
+    materiasSelecionadas: saved.materiasSelecionadas && typeof saved.materiasSelecionadas === 'object' ? saved.materiasSelecionadas : {},
+    materiaAfinidade: saved.materiaAfinidade && typeof saved.materiaAfinidade === 'object' ? saved.materiaAfinidade : {},
+    materiaPrioridades: saved.materiaPrioridades && typeof saved.materiaPrioridades === 'object' ? saved.materiaPrioridades : {},
+    ritmo: saved.ritmo || 'equilibrado',
+    horas: { ...DEFAULT_CONFIG.horas, ...(saved.horas || {}) },
+    maxTopicosDia: saved.maxTopicosDia !== undefined ? clampNumber(saved.maxTopicosDia, 0, 20, DEFAULT_CONFIG.maxTopicosDia) : DEFAULT_CONFIG.maxTopicosDia,
+    focusAlertsCustomEnabled: saved.focusAlertsCustomEnabled !== undefined ? !!saved.focusAlertsCustomEnabled : DEFAULT_CONFIG.focusAlertsCustomEnabled,
+    focusAlertsCustomGoal: saved.focusAlertsCustomGoal !== undefined ? normalizeFocusCustomGoalValue(saved.focusAlertsCustomGoal) : DEFAULT_CONFIG.focusAlertsCustomGoal
+  };
+}
+
+function collectConfigFromUi() {
+  const horas = {};
+  DAY_LABELS.forEach(day => {
+    horas[day.key] = clampNumber(document.getElementById('hour_' + day.key)?.value, 0, 18, 0);
+  });
+  return {
+    tipo: config?.tipo || '',
+    cicloModo: config?.cicloModo || 'sugerido',
+    agendadoSetupDone: !!config?.agendadoSetupDone,
+    agendadoSetupStep: clampNumber(config?.agendadoSetupStep, 1, 4, 1),
+    materiasSelecionadas: config?.materiasSelecionadas || {},
+    materiaAfinidade: config?.materiaAfinidade || {},
+    materiaPrioridades: config?.materiaPrioridades || {},
+    ritmo: config?.ritmo || 'equilibrado',
+    horas,
+    revisaoPct: 0,
+    questoesPct: 0,
+    minutosTopico: config?.minutosTopico || DEFAULT_CONFIG.minutosTopico,
+    minutosSubtopico: config?.minutosSubtopico || DEFAULT_CONFIG.minutosSubtopico,
+    maxTopicosDia: config?.maxTopicosDia !== undefined ? clampNumber(config.maxTopicosDia, 0, 20, DEFAULT_CONFIG.maxTopicosDia) : DEFAULT_CONFIG.maxTopicosDia,
+    focusAlertsCustomEnabled: config?.focusAlertsCustomEnabled !== undefined ? !!config.focusAlertsCustomEnabled : DEFAULT_CONFIG.focusAlertsCustomEnabled,
+    focusAlertsCustomGoal: config?.focusAlertsCustomGoal !== undefined ? normalizeFocusCustomGoalValue(config.focusAlertsCustomGoal) : DEFAULT_CONFIG.focusAlertsCustomGoal
+  };
+}
+
+function reorganizarCronograma() {
+  if (config.tipo === 'ciclo') {
+    const cid = cId;
+    try {
+      const cycleKey = 'ct_ciclo_' + cid;
+      localStorage.removeItem(cycleKey);
+    } catch(e){}
+
+    localStorage.setItem('ct_cronograma_inteligente_' + cId, JSON.stringify(config));
+    if (window.CTCycle && typeof window.CTCycle.getData === 'function') {
+      window.CTCycle.getData();
+    }
+  }
+
+  persistCronogramaConfig('cronograma-reorganizado', { immediate: true });
+  showToast(config.tipo === 'ciclo' ? 'Ciclo de estudos reorganizado.' : 'Cronograma reorganizado com as novas horas de estudo.');
+  
+  const btn = document.getElementById('btnReorganizar');
+  if (btn) {
+    btn.setAttribute('disabled', 'true');
+    btn.classList.remove('pulse-glow');
+  }
+  
+  render();
+}
+
+function recriarCronograma() {
+  setupHoursModified = false;
+  config = {
+    ...config,
+    tipo: '',
+    agendadoSetupDone: false,
+    agendadoSetupStep: 1,
+    agendadoStartDate: ''
+  };
+  persistCronogramaConfig('cronograma-recriar', { immediate: true });
+  showToast('Selecione o formato para recriar seu cronograma.');
+  render();
+}
+
+function escolherTipoCronograma(tipo) {
+  const proximoTipo = tipo === 'ciclo' ? 'ciclo' : 'agendado';
+  
+  if (proximoTipo === 'ciclo') {
+    const cid = cId;
+    try {
+      const cycleKey = 'ct_ciclo_' + cid;
+      localStorage.removeItem(cycleKey);
+    } catch(e){}
+
+    if (typeof window.setViewMode === 'function') {
+      window.setViewMode('cycle');
+    } else {
+      localStorage.setItem('ct_crono_modo_' + cId, 'cycle');
+      localStorage.setItem('ct_crono_modo_global', 'cycle');
+    }
+  } else {
+    if (typeof window.setViewMode === 'function') {
+      window.setViewMode('weekly');
+    } else {
+      localStorage.setItem('ct_crono_modo_' + cId, 'weekly');
+      localStorage.setItem('ct_crono_modo_global', 'weekly');
+    }
+  }
+
+  config = {
+    ...loadConfig(),
+    tipo: proximoTipo,
+    cicloModo: proximoTipo === 'ciclo' ? ((config?.cicloModo && config.cicloModo !== 'agendado') ? config.cicloModo : 'sugerido') : 'agendado',
+    agendadoSetupDone: false,
+    agendadoSetupStep: 1
+  };
+  persistCronogramaConfig('cronograma-escolha-formato', { delay: 300 });
+  showToast(proximoTipo === 'ciclo' ? 'Ciclo de Estudos ativado.' : 'Cronograma Agendado ativado.');
+
+  if (proximoTipo === 'ciclo') {
+    localStorage.setItem('ct_cronograma_inteligente_' + cId, JSON.stringify(config));
+    if (window.CTCycle && typeof window.CTCycle.getData === 'function') {
+      window.CTCycle.getData();
+    }
+  }
+
+  render();
+  if (typeof window.renderCrono === 'function') window.renderCrono();
+}
+
+function alterarTipoCronograma() {
+  config = { ...collectConfigFromUi(), tipo: '' };
+  persistCronogramaConfig('cronograma-alterar-formato', { delay: 300 });
+  render();
+}
+
+function setCicloModo(cicloModo) {
+  config = { ...collectConfigFromUi(), tipo: 'ciclo', cicloModo: cicloModo === 'livre' ? 'livre' : 'sugerido' };
+  persistCronogramaConfig('cronograma-ciclo-modo', { delay: 300 });
+
+  const cid = cId;
+  try {
+    const cycleKey = 'ct_ciclo_' + cid;
+    localStorage.removeItem(cycleKey);
+  } catch(e){}
+
+  localStorage.setItem('ct_cronograma_inteligente_' + cId, JSON.stringify(config));
+  if (window.CTCycle && typeof window.CTCycle.getData === 'function') {
+    window.CTCycle.getData();
+  }
+
+  showToast(config.cicloModo === 'livre' ? 'Ciclo livre selecionado (horas a definir).' : 'Ciclo sugerido selecionado e gerado.');
+  render();
+  if (typeof window.renderCrono === 'function') window.renderCrono();
+}
+
+
+
+function showToast(text) {
+  const el = document.getElementById('toast');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.add('visible');
+  clearTimeout(showToast._timer);
+  showToast._timer = setTimeout(() => el.classList.remove('visible'), 2200);
+}
+
+function formatHours(value) {
+  const n = Number(value) || 0;
+  if (n === 0) return '0h';
+  const h = Math.floor(n);
+  const m = Math.round((n - h) * 60);
+  if (!m) return h + 'h';
+  if (!h) return m + 'min';
+  return h + 'h' + String(m).padStart(2, '0');
+}
+
+function formatMinutes(min) {
+  const n = Math.max(0, Math.round(Number(min) || 0));
+  const h = Math.floor(n / 60);
+  const m = n % 60;
+  if (h && m) return h + 'h' + String(m).padStart(2, '0');
+  if (h) return h + 'h';
+  return m + 'min';
+}
+
+function formatDecimal(value, digits = 1) {
+  const n = Number(value) || 0;
+  return n.toFixed(digits).replace('.', ',');
+}
+
+function roundedCount(value) {
+  return Math.max(0, Math.round(Number(value) || 0));
+}
+
+function formatTopicCount(value) {
+  const n = roundedCount(value);
+  return n + ' ' + (n === 1 ? 'tópico' : 'tópicos');
+}
+
+function formatTopicRate(value) {
+  const n = roundedCount(value);
+  return n + ' ' + (n === 1 ? 'tópico/dia de estudo' : 'tópicos/dia de estudo');
+}
+
+function priorityTierLabel(value) {
+  const n = Number(value) || 0;
+  if (n >= 70) return 'Prioridade Máxima';
+  if (n >= 55) return 'Prioridade Alta';
+  if (n >= 40) return 'Prioridade Média';
+  return 'Prioridade Baixa';
+}
+
+function priorityClass(value) {
+  const n = Number(value) || 0;
+  if (n >= 70) return 'priority-maxima';
+  if (n >= 55) return 'priority-alta';
+  if (n >= 40) return 'priority-media';
+  return 'priority-baixa';
+}
+
+const PRIORITY_LEVELS = [
+  { key: '', label: 'Automático', score: null },
+  { key: 'baixa', label: 'Baixa', score: 32 },
+  { key: 'media', label: 'Média', score: 47 },
+  { key: 'alta', label: 'Alta', score: 62 },
+  { key: 'maxima', label: 'Máxima', score: 78 }
+];
+
+function normalizePriorityLevel(value) {
+  const key = String(value || '').toLowerCase();
+  return PRIORITY_LEVELS.some(level => level.key === key) ? key : '';
+}
+
+function priorityLevelFromScore(value) {
+  const n = Number(value) || 0;
+  if (n >= 70) return 'maxima';
+  if (n >= 55) return 'alta';
+  if (n >= 40) return 'media';
+  return 'baixa';
+}
+
+function priorityLevelInfo(levelKey) {
+  const normalized = normalizePriorityLevel(levelKey);
+  return PRIORITY_LEVELS.find(level => level.key === normalized) || PRIORITY_LEVELS[0];
+}
+
+function getManualMateriaPriorityLevel(materiaId) {
+  const map = config && config.materiaPrioridades && typeof config.materiaPrioridades === 'object' ? config.materiaPrioridades : {};
+  return normalizePriorityLevel(map[String(materiaId || '')]);
+}
+
+function applyManualMateriaPriority(materiaId, autoPriority) {
+  const level = getManualMateriaPriorityLevel(materiaId);
+  const info = priorityLevelInfo(level);
+  return info.score == null ? Math.round(Number(autoPriority) || 0) : info.score;
+}
+
+function formatDecimalToHourStr(hoursNum) {
+  if (!hoursNum || hoursNum <= 0) return "";
+  const h = Math.floor(hoursNum);
+  const m = Math.round((hoursNum - h) * 60);
+  if (m === 0) return h + "h";
+  return h + "h" + String(m).padStart(2, "0");
+}
+
+function parseHourStrToDecimal(str) {
+  if (!str) return 0;
+  str = String(str).trim().toLowerCase();
+  if (!str) return 0;
+  
+  if (!str.includes('h') && !str.includes(':')) {
+    const parsed = parseFloat(str.replace(',', '.'));
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  
+  if (str.includes('h')) {
+    const parts = str.split('h');
+    const h = parseInt(parts[0], 10) || 0;
+    let m = 0;
+    if (parts[1]) {
+      m = parseInt(parts[1].trim(), 10) || 0;
+    }
+    return h + (m / 60);
+  }
+  
+  if (str.includes(':')) {
+    const parts = str.split(':');
+    const h = parseInt(parts[0], 10) || 0;
+    const m = parseInt(parts[1], 10) || 0;
+    return h + (m / 60);
+  }
+  
+  return 0;
+}
+
+function onSetupHourBlur(input) {
+  const parsed = parseHourStrToDecimal(input.value);
+  if (parsed <= 0) {
+    input.value = "";
+  } else {
+    input.value = formatDecimalToHourStr(parsed);
+  }
+}
+
+function onConfigHourBlur(input, dayKey) {
+  const parsed = parseHourStrToDecimal(input.value);
+  if (parsed <= 0) {
+    input.value = "";
+  } else {
+    input.value = formatDecimalToHourStr(parsed);
+  }
+  
+  const originalVal = Number(config.horas[dayKey]) || 0;
+  if (parsed !== originalVal) {
+    config.horas[dayKey] = parsed;
+    persistCronogramaConfig('cronograma-horas-auto', { immediate: true });
+    
+    const btn = document.getElementById('btnReorganizar');
+    if (btn) {
+      btn.removeAttribute('disabled');
+      btn.classList.add('pulse-glow');
+    }
+  }
+}
+
+function formatDateBR(date) {
+  if (!date) return '-';
+  return date.toLocaleDateString('pt-BR', { day:'2-digit', month:'2-digit' });
+}
+
+function totalWeeklyHours(cfg) {
+  return DAY_LABELS.reduce((acc, day) => acc + (Number(cfg.horas[day.key]) || 0), 0);
+}
+
+function getMateriaSelectionMap(cfg = config) {
+  return cfg && cfg.materiasSelecionadas && typeof cfg.materiasSelecionadas === 'object'
+    ? cfg.materiasSelecionadas
+    : {};
+}
+
+function isMateriaSelected(materiaId, cfg = config) {
+  const map = getMateriaSelectionMap(cfg);
+  const key = String(materiaId || '');
+  if (!key || !Object.prototype.hasOwnProperty.call(map, key)) return true;
+  return map[key] !== false;
+}
+
+function getSelectedMaterias(materias, cfg = config) {
+  const list = Array.isArray(materias) ? materias : [];
+  const selected = list.filter(materia => isMateriaSelected(materia.id, cfg));
+  return selected.length ? selected : list;
+}
+
+function countMateriaStudyUnits(materiaId) {
+  const topicos = CT.getTopicos(materiaId) || [];
+  if (!topicos.length) return 1;
+  return topicos.reduce((acc, topico) => {
+    const subs = CT.getSubtopicos(topico.id) || [];
+    return acc + (subs.length || 1);
+  }, 0);
+}
+
+function numOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(String(value).replace(',', '.'));
+  return Number.isFinite(n) ? n : null;
+}
+
+function normalizePainelConfig() {
+  const raw = readJson('ct_config_prova_' + cId, { groups: [] }) || {};
+  const configProva = { ...raw };
+  if (Array.isArray(configProva.geral) || Array.isArray(configProva.especifico)) {
+    configProva.groups = [];
+    if (Array.isArray(configProva.geral)) configProva.groups.push({ id:'geral', name:'Conhecimentos Gerais', items: configProva.geral });
+    if (Array.isArray(configProva.especifico)) configProva.groups.push({ id:'especifico', name:'Conhecimentos Específicos', items: configProva.especifico });
+  }
+  configProva.groups = Array.isArray(configProva.groups) ? configProva.groups : [];
+  configProva.scoringMode = ['cebraspe', 'media_areas'].includes(configProva.scoringMode) ? configProva.scoringMode : 'tradicional';
+  return configProva;
+}
+
+function groupUsesPoolScoring(group, scoringMode) {
+  return Array.isArray(group.items) && group.items.length && group.items.some(item =>
+    numOrNull(item.q) == null || (scoringMode !== 'cebraspe' && numOrNull(item.w) == null)
+  );
+}
+
+function getPainelMeta(materias) {
+  const prova = normalizePainelConfig();
+  const map = new Map();
+  const materiaById = new Map(materias.map(m => [String(m.id), m]));
+  let totalPontos = 0;
+  let totalQuestoes = 0;
+  const isCespe = prova.scoringMode === 'cebraspe';
+  const isAreaMean = prova.scoringMode === 'media_areas';
+
+  prova.groups.forEach((group, groupIndex) => {
+    const items = Array.isArray(group.items) ? group.items : [];
+    if (!items.length) return;
+    if (groupUsesPoolScoring(group, prova.scoringMode)) {
+      const blocoQuestoes = Math.max(0, numOrNull(group.q) || 0);
+      const blocoPeso = Math.max(0, numOrNull(group.w) || 1);
+      const validItems = items.map(item => materiaById.get(String(item.id))).filter(Boolean);
+      if (!validItems.length) return;
+      const pontos = isAreaMean ? blocoPeso * 10 : (isCespe ? blocoQuestoes : blocoQuestoes * blocoPeso);
+      const qEach = blocoQuestoes / validItems.length;
+      const pEach = pontos / validItems.length;
+      validItems.forEach(materia => {
+        const row = map.get(String(materia.id)) || { questoes:0, pontos:0 };
+        row.questoes += qEach;
+        row.pontos += pEach;
+        map.set(String(materia.id), row);
+      });
+      totalQuestoes += blocoQuestoes;
+      totalPontos += pontos;
+      return;
+    }
+
+    items.forEach(item => {
+      const materia = materiaById.get(String(item.id));
+      if (!materia) return;
+      const q = Math.max(0, numOrNull(item.q) || 0);
+      const w = Math.max(0, numOrNull(item.w) || 1);
+      if (!q) return;
+      const pontos = isAreaMean ? w * 10 : (isCespe ? q : q * w);
+      const row = map.get(String(materia.id)) || { questoes:0, pontos:0 };
+      row.questoes += q;
+      row.pontos += pontos;
+      map.set(String(materia.id), row);
+      totalQuestoes += q;
+      totalPontos += pontos;
+    });
+  });
+
+  if (!map.size && materias.length) {
+    materias.forEach(m => map.set(String(m.id), { questoes:1, pontos:1 }));
+    totalQuestoes = materias.length;
+    totalPontos = materias.length;
+  }
+
+  map.forEach(row => {
+    row.share = totalPontos > 0 ? row.pontos / totalPontos : 0;
+  });
+
+  return { map, totalPontos, totalQuestoes, hasPanel: prova.groups.length > 0 };
+}
+
+function sortByTimeDesc(a, b) {
+  const ad = String(a.horaInicio || a.createdAt || a.data || '');
+  const bd = String(b.horaInicio || b.createdAt || b.data || '');
+  return bd.localeCompare(ad);
+}
+
+function calcRecentStats(entries, limit) {
+  let remaining = limit || 30;
+  let resolvidas = 0;
+  let acertos = 0;
+  let erros = 0;
+  (entries || []).slice().sort(sortByTimeDesc).forEach(q => {
+    if (remaining <= 0) return;
+    const total = Math.max(0, Number(q.resolvidas) || 0);
+    if (!total) return;
+    const take = Math.min(remaining, total);
+    const ratio = take / total;
+    resolvidas += take;
+    acertos += (Number(q.acertos) || 0) * ratio;
+    erros += (Number(q.erros) || 0) * ratio;
+    remaining -= take;
+  });
+  const pct = resolvidas > 0 ? Math.round((acertos / resolvidas) * 100) : null;
+  return { resolvidas: Math.round(resolvidas), acertos: Math.round(acertos), erros: Math.round(erros), pct };
+}
+
+function classifyPerformance(general, recent) {
+  if (!general || !general.resolvidas) return { key:'sem_amostra', label:'sem amostra', className:'neutral' };
+  if (!recent || recent.resolvidas < Math.min(10, general.resolvidas)) return { key:'amostra_baixa', label:'amostra baixa', className:'neutral' };
+  
+  const customEnabled = config && config.focusAlertsCustomEnabled;
+  const customGoal = config ? normalizeFocusCustomGoalValue(config.focusAlertsCustomGoal) : DEFAULT_CONFIG.focusAlertsCustomGoal;
+  
+  if (recent.pct < 65) {
+    return { key:'dificuldade', label:'atenção', className:'warning' };
+  }
+  // [R7-port D1] branch morto removido (orig 1546-1548): if (general.pct >= 80 &&
+  // recent.pct < 65) → 'queda' era inalcançável (recent.pct < 65 já retornou
+  // 'dificuldade' acima). O sinal 'queda' segue morto nos usos (arrays) — verbatim;
+  // decisão final eliminado/tornado real é da Etapa 14 (decisão Oodeus 2026-11-13).
+  
+  if (customEnabled && recent.pct < customGoal) {
+    return { key:'abaixo_meta', label:'abaixo da meta', className:'below-meta' };
+  }
+  
+  if (general.pct < 75 && recent.pct >= 80) return { key:'recuperacao', label:'em recuperação', className:'recovery' };
+  if (recent.pct >= 90) return { key:'dominando', label:'dominando', className:'dominate' };
+  return { key:'estavel', label:'estável', className:'neutral' };
+}
+
+function getSimMateriaStats(materiaId) {
+  const sims = (CT.getSimulados(cId) || [])
+    .filter(sim => sim && sim.tipo !== 'pendente')
+    .sort((a, b) => String(a.criadoEm || '').localeCompare(String(b.criadoEm || '')));
+  const values = [];
+  sims.forEach(sim => {
+    let pct = null;
+    if (sim.desempenhoPainel && Array.isArray(sim.desempenhoPainel.materias)) {
+      const row = sim.desempenhoPainel.materias.find(item => String(item.materiaId) === String(materiaId));
+      if (row && Number.isFinite(Number(row.pct))) pct = Number(row.pct);
+    } else if (sim.notasMaterias && sim.notasMaterias[materiaId] != null) {
+      pct = Number(sim.notasMaterias[materiaId]);
+    }
+    if (Number.isFinite(pct)) values.push({ pct, sim });
+  });
+  if (!values.length) return { ultimo:null, media:null, count:0 };
+  const media = Math.round(values.reduce((acc, item) => acc + item.pct, 0) / values.length);
+  return { ultimo: Math.round(values[values.length - 1].pct), media, count: values.length };
+}
+
+function getUnitQuestions(allQuestions, unit) {
+  return allQuestions.filter(q => {
+    if (unit.subtopId) return (q.subtopId || q.subtopicoId) === unit.subtopId;
+    if (unit.topicoId) return q.topicoId === unit.topicoId && !(q.subtopId || q.subtopicoId);
+    return q.materiaId === unit.materiaId;
+  });
+}
+
+function getUnitSessions(allSessions, unit) {
+  return allSessions.filter(s => {
+    if (unit.subtopId) return (s.subtopId || s.subtopicoId) === unit.subtopId;
+    if (unit.topicoId) return s.topicoId === unit.topicoId && !(s.subtopId || s.subtopicoId);
+    return s.materiaId === unit.materiaId;
+  });
+}
+
+function getMateriaAffinity(materiaId) {
+  const n = Number(config?.materiaAfinidade?.[materiaId]);
+  return Number.isFinite(n) ? Math.min(5, Math.max(1, n)) : 3;
+}
+
+function getHistoricalAvgMinutesPerTopic(allSessions) {
+  const validSessions = (allSessions || []).filter(s => {
+    const sec = Number(s.segundos || s.duracao || 0);
+    return sec >= 180;
+  });
+  if (!validSessions.length) return 60;
+  const totalSec = validSessions.reduce((acc, s) => acc + Number(s.segundos || s.duracao || 0), 0);
+  const avgMin = (totalSec / validSessions.length) / 60;
+  return Math.min(90, Math.max(25, avgMin));
+}
+
+function estimateUnitMinutes(unit, meta, maxShare, historicalAvg = 60) {
+  const affinity = getMateriaAffinity(unit.materiaId);
+  const relevance = Math.max(0.12, Math.min(1, ((meta.share || 0) / maxShare) || 0.35));
+  const affinityMultiplier = { 1:1.35, 2:1.18, 3:1, 4:.86, 5:.72 }[affinity] || 1;
+  const rhythmMultiplier = config.ritmo === 'conservador' ? 1.12 : (config.ritmo === 'intensivo' ? .9 : 1);
+  const trendBonus = ['dificuldade', 'queda'].includes(unit.signal?.key) ? 10 : 0;
+  const typeBonus = unit.tipo === 'materia' ? 8 : (unit.tipo === 'topico' ? 4 : 0);
+  const scaleFactor = (config.minutosTopico || 60) / 60;
+  const scaledBase = 24 * scaleFactor;
+  const scaledRelevance = 42 * scaleFactor;
+  const raw = (scaledBase + (relevance * scaledRelevance) + trendBonus + typeBonus) * affinityMultiplier * rhythmMultiplier;
+  return Math.round(Math.max(20, Math.min(300, raw)));
+}
+
+function dailyTopicManualCap(cfg = config) {
+  const n = parseInt(cfg?.maxTopicosDia, 10);
+  return Number.isFinite(n) && n > 0 ? Math.min(20, Math.max(1, n)) : 0;
+}
+
+function dailyTopicLimit(hours, cfg = config) {
+  const minutesPerTopic = Math.max(1, Number(cfg?.minutosTopico) || DEFAULT_CONFIG.minutosTopico || 60);
+  const availableMinutes = Math.max(0, Number(hours) || 0) * 60;
+  if (availableMinutes <= 0) return 0;
+  const automaticLimit = Math.max(1, Math.floor(availableMinutes / minutesPerTopic));
+  const manualCap = dailyTopicManualCap(cfg);
+  return manualCap ? Math.min(automaticLimit, manualCap) : automaticLimit;
+}
+
+function dailyMateriaLimit(maxItems, eligibleMateriaCount) {
+  const itemLimit = Math.max(1, parseInt(maxItems, 10) || 1);
+  const materiaCount = Math.max(1, parseInt(eligibleMateriaCount, 10) || 1);
+  if (materiaCount >= itemLimit) return 1;
+  return Math.max(1, Math.ceil(itemLimit / materiaCount));
+}
+
+const TODAY_PENDING_WARNING = 'Se o tópico não for finalizado hoje, será empurrado para o próximo dia de estudo.';
+
+function dateKey(date) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  return y + '-' + m + '-' + d;
+}
+
+function addDays(date, amount) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + amount);
+  next.setHours(0, 0, 0, 0);
+  return next;
+}
+
+function daysBetween(start, end) {
+  if (!start || !end) return null;
+  const a = new Date(start); a.setHours(0, 0, 0, 0);
+  const b = new Date(end); b.setHours(0, 0, 0, 0);
+  return Math.max(1, Math.ceil((b - a) / 86400000) + 1);
+}
+
+function getEntryDateKey(entry) {
+  if (entry && typeof entry.data === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(entry.data.trim())) {
+    return entry.data.trim();
+  }
+  var raw = entry && (entry.horaInicio || entry.createdAt || entry.updatedAt);
+  if (raw) {
+    var d = new Date(raw);
+    if (!Number.isNaN(d.getTime())) return dateKey(d);
+  }
+  return '';
+}
+
+function calendarScheduleItemKey(unit) {
+  if (!unit) return '';
+  if (unit.subtopId) return 'sub:' + unit.subtopId;
+  if (unit.topicoId) return 'top:' + unit.topicoId;
+  if (unit.materiaId) return 'mat:' + unit.materiaId;
+  return '';
+}
+
+function calendarDailySnapshotKey() {
+  return 'ct_crono_dia_snapshot_' + cId;
+}
+
+function readCalendarDailySnapshots() {
+  if (!cId) return {};
+  try {
+    const parsed = JSON.parse(localStorage.getItem(calendarDailySnapshotKey()) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (e) {
+    return {};
+  }
+}
+
+function findCalendarSnapshotUnit(entry) {
+  const units = state?.units || [];
+  const id = typeof entry === 'string' ? entry : (entry && entry.id);
+  const key = typeof entry === 'string' ? '' : (entry && entry.key);
+  if (id) {
+    const byId = units.find(unit => String(unit.id || '') === String(id));
+    if (byId) return byId;
+  }
+  if (!key) return null;
+  if (key.indexOf('sub:') === 0) {
+    const subId = key.slice(4);
+    return units.find(unit => String(unit.subtopId || '') === String(subId)) || null;
+  }
+  if (key.indexOf('top:') === 0) {
+    const topId = key.slice(4);
+    return units.find(unit => String(unit.topicoId || '') === String(topId) && !unit.subtopId) || null;
+  }
+  if (key.indexOf('mat:') === 0) {
+    const materiaId = key.slice(4);
+    return units.find(unit => String(unit.id || '') === key || String(unit.materiaId || '') === String(materiaId)) || null;
+  }
+  return null;
+}
+
+function getCalendarSnapshotItems(dayKey) {
+  const snapshot = readCalendarDailySnapshots()[dayKey];
+  if (!snapshot || !Array.isArray(snapshot.items) || !snapshot.items.length) return null;
+  const items = snapshot.items.map(entry => {
+    const unit = findCalendarSnapshotUnit(entry);
+    if (!unit) return null;
+    const clone = { ...unit, _fromDailySnapshot: true };
+    if (entry && typeof entry === 'object') {
+      if (Number.isFinite(Number(entry.priority)) && Number(entry.priority) > 0) clone.priority = Number(entry.priority);
+      if (entry.scheduleLane) clone.scheduleLane = entry.scheduleLane;
+      if (Number.isFinite(Number(entry.estimateMinutes)) && Number(entry.estimateMinutes) > 0) {
+        clone.estimateMinutes = Number(entry.estimateMinutes);
+        clone.minutes = Number(entry.estimateMinutes);
+      }
+    }
+    return clone;
+  }).filter(Boolean);
+  return items.length ? items : null;
+}
+
+function calendarScheduledKeys(items) {
+  return new Set((items || []).flatMap(item => {
+    const values = [];
+    if (item.id) values.push(String(item.id));
+    const key = calendarScheduleItemKey(item);
+    if (key) values.push(key);
+    return values;
+  }));
+}
+
+function calendarSnapshotHasExtraCompletion(snapshotItems, computedItems, dayKey) {
+  if (!Array.isArray(snapshotItems) || !snapshotItems.length || !Array.isArray(computedItems) || !computedItems.length) return false;
+  const computedKeys = calendarScheduledKeys(computedItems);
+  return snapshotItems.some(unit => {
+    if (!(unit && unit.done && unit.doneAt === dayKey)) return false;
+    const id = String(unit.id || '');
+    const key = calendarScheduleItemKey(unit);
+    return (!id || !computedKeys.has(id)) && (!key || !computedKeys.has(key));
+  });
+}
+
+function writeCalendarSnapshot(dayKey, items) {
+  if (!cId || !dayKey || !Array.isArray(items) || !items.length) return;
+  const plannedItems = items.filter(unit => unit && !unit._extraToday);
+  if (!plannedItems.length) return;
+  const storageKey = calendarDailySnapshotKey();
+  let snapshots = {};
+  try {
+    snapshots = JSON.parse(localStorage.getItem(storageKey) || '{}') || {};
+  } catch (e) {
+    snapshots = {};
+  }
+  snapshots[dayKey] = {
+    data: dayKey,
+    createdAt: snapshots[dayKey]?.createdAt || new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    items: plannedItems.map(unit => ({
+      id: unit.id || '',
+      key: calendarScheduleItemKey(unit),
+      priority: Number(unit.priority) || 0,
+      scheduleLane: unit.scheduleLane || '',
+      estimateMinutes: Number(unit.estimateMinutes || unit.minutes) || 0
+    })).filter(entry => entry.id || entry.key)
+  };
+  localStorage.setItem(storageKey, JSON.stringify(snapshots));
+}
+
+function rebuildTodaySnapshotFromState() {
+  if (!state || !Array.isArray(state.units)) return;
+  const today = new Date();
+  const todayKey = dateKey(today);
+  const histDay = state.historySchedule ? (state.historySchedule.days || []).find(day => day.key === todayKey) : null;
+  const items = (histDay?.items || []).map(unit => ({ ...unit }));
+  const dayKey = JS_DAY_TO_KEY[today.getDay()];
+  const hours = Number(config?.horas?.[dayKey]) || 0;
+  const maxItems = dailyTopicLimit(hours) || items.length;
+  writeCalendarSnapshot(todayKey, items.slice(0, maxItems || items.length));
+}
+
+function buildAgendadoScheduleFromDate(remainingUnits, materiasRows, historyStart, historyEnd) {
+  const remaining = (remainingUnits || []).slice().sort((a, b) => b.priority - a.priority);
+  const lastDayByMateria = new Map();
+  const consecutiveDaysByMateria = new Map();
+  const days = [];
+  
+  const diffMs = historyEnd.getTime() - historyStart.getTime();
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  
+  let studyDayIndex = 0;
+  
+  function unitFits(unit, capacity, hasItems) {
+    if (!unit) return false;
+    return unit.estimateMinutes <= capacity + (hasItems ? 10 : 20);
+  }
+
+  for (let i = 0; i < diffDays && remaining.length; i++) {
+    const date = addDays(historyStart, i);
+    const dayKey = JS_DAY_TO_KEY[date.getDay()];
+    const hours = Number(config.horas[dayKey]) || 0;
+    if (hours <= 0) continue;
+    
+    let capacity = hours * 60;
+    const maxItems = dailyTopicLimit(hours);
+    const items = [];
+    const usedMateria = new Set();
+    const materiaUseCount = new Map();
+
+    const eligibleMateriaIds = new Set();
+    remaining.forEach(u => {
+      const id = String(u.materiaId);
+      const consecutive = consecutiveDaysByMateria.get(id) || 0;
+      const matRow = (materiasRows || []).find(r => String(r.materia.id) === id);
+      const priority = matRow ? matRow.priority : 50;
+      
+      let eligible = true;
+      if (priority >= 70) {
+        eligible = true;
+      } else if (priority >= 55) {
+        if (consecutive >= 2) eligible = false;
+      } else if (priority >= 40) {
+        if (consecutive >= 1) eligible = false;
+      } else {
+        if (consecutive >= 1) eligible = false;
+      }
+      if (eligible) eligibleMateriaIds.add(id);
+    });
+
+    const maxPerMateria = dailyMateriaLimit(maxItems, eligibleMateriaIds.size);
+    const markMateriaUsed = (materiaId) => {
+      const id = String(materiaId || '');
+      if (!id) return;
+      usedMateria.add(id);
+      materiaUseCount.set(id, (materiaUseCount.get(id) || 0) + 1);
+    };
+    const canUseMateria = (materiaId) => {
+      const id = String(materiaId || '');
+      return (materiaUseCount.get(id) || 0) < maxPerMateria;
+    };
+
+    const forceCandidates = (materiasRows || [])
+      .filter(r => eligibleMateriaIds.has(String(r.materia.id)))
+      .map(r => {
+        const id = String(r.materia.id);
+        const consecutive = consecutiveDaysByMateria.get(id) || 0;
+        let forceTier = 0;
+        if (r.priority >= 70) {
+          forceTier = 1;
+        } else if (r.priority >= 55 && consecutive < 2) {
+          forceTier = 2;
+        }
+        return { row: r, forceTier };
+      })
+      .filter(item => item.forceTier > 0)
+      .sort((a, b) => a.forceTier - b.forceTier || b.row.priority - a.row.priority);
+
+    forceCandidates.forEach(item => {
+      if (items.length >= maxItems) return;
+      const idx = remaining.findIndex(u => String(u.materiaId) === String(item.row.materia.id) && unitFits(u, capacity, items.length > 0));
+      if (idx !== -1) {
+        const [unit] = remaining.splice(idx, 1);
+        unit.scheduleLane = 'core';
+        items.push(unit);
+        markMateriaUsed(unit.materiaId);
+        lastDayByMateria.set(unit.materiaId, studyDayIndex);
+        capacity -= unit.estimateMinutes;
+      }
+    });
+    
+    let safety = 0;
+    while (remaining.length && capacity >= 18 && items.length < maxItems && safety < 100) {
+      safety += 1;
+      let candidates = remaining.filter(unit => eligibleMateriaIds.has(String(unit.materiaId)) && unitFits(unit, capacity, items.length > 0));
+      if (!candidates.length) break;
+      const cappedCandidates = candidates.filter(unit => canUseMateria(unit.materiaId));
+      if (cappedCandidates.length) candidates = cappedCandidates;
+      const candidateMateriaIds = new Set(candidates.map(u => String(u.materiaId)));
+      let targetMateriaIds = Array.from(candidateMateriaIds).filter(id => !usedMateria.has(id));
+      if (!targetMateriaIds.length) {
+        targetMateriaIds = Array.from(candidateMateriaIds);
+      }
+      const targetMateriaRows = targetMateriaIds.map(materiaId => {
+        const last = lastDayByMateria.get(materiaId);
+        const gap = last === undefined ? 99 : (studyDayIndex - last);
+        const matRow = (materiasRows || []).find(r => String(r.materia.id) === String(materiaId));
+        const priority = matRow ? matRow.priority : 50;
+        let targetInterval = 3.5;
+        if (priority >= 70) targetInterval = 1.0;
+        else if (priority >= 55) targetInterval = 1.5;
+        else if (priority >= 40) targetInterval = 2.0;
+        const dueScore = gap / targetInterval;
+        return { materiaId, priority, dueScore };
+      });
+      targetMateriaRows.sort((a, b) => (b.dueScore - a.dueScore) || (b.priority - a.priority));
+      const bestMateriaId = targetMateriaRows[0].materiaId;
+      const bestUnitIndex = remaining.findIndex(u => String(u.materiaId) === String(bestMateriaId) && unitFits(u, capacity, items.length > 0));
+      if (bestUnitIndex === -1) break;
+      const [unit] = remaining.splice(bestUnitIndex, 1);
+      const bestPriority = targetMateriaRows[0] ? targetMateriaRows[0].priority : 50;
+      unit.scheduleLane = bestPriority < 55 ? 'support' : 'core';
+      items.push(unit);
+      markMateriaUsed(unit.materiaId);
+      lastDayByMateria.set(unit.materiaId, studyDayIndex);
+      capacity -= unit.estimateMinutes;
+    }
+    
+    if (items.length) {
+      days.push({ date, key: dateKey(date), dayKey, hours, items });
+      studyDayIndex += 1;
+    }
+    
+    (materiasRows || []).forEach(row => {
+      const id = String(row.materia.id);
+      if (usedMateria.has(id)) {
+        consecutiveDaysByMateria.set(id, (consecutiveDaysByMateria.get(id) || 0) + 1);
+      } else {
+        consecutiveDaysByMateria.set(id, 0);
+      }
+    });
+  }
+  return { days };
+}
+
+function buildAgendadoSchedule(remainingUnits, materiasRows) {
+  const remaining = (remainingUnits || []).slice().sort((a, b) => b.priority - a.priority);
+  const lastDayByMateria = new Map();
+  const consecutiveDaysByMateria = new Map();
+  const days = [];
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = addDays(today, 1);
+  
+  let studyDayIndex = 0;
+  
+  function unitFits(unit, capacity, hasItems) {
+    if (!unit) return false;
+    return unit.estimateMinutes <= capacity + (hasItems ? 10 : 20);
+  }
+
+  for (let i = 0; i < 420 && remaining.length; i++) {
+    const date = addDays(tomorrow, i);
+    const dayKey = JS_DAY_TO_KEY[date.getDay()];
+    const hours = Number(config.horas[dayKey]) || 0;
+    if (hours <= 0) continue;
+    
+    let capacity = hours * 60;
+    const maxItems = dailyTopicLimit(hours);
+    const items = [];
+    const usedMateria = new Set();
+    const materiaUseCount = new Map();
+
+    // Check eligibility of all candidate materias
+    const eligibleMateriaIds = new Set();
+    remaining.forEach(u => {
+      const id = String(u.materiaId);
+      const consecutive = consecutiveDaysByMateria.get(id) || 0;
+      const matRow = (materiasRows || []).find(r => String(r.materia.id) === id);
+      const priority = matRow ? matRow.priority : 50;
+      
+      let eligible = true;
+      if (priority >= 70) {
+        eligible = true;
+      } else if (priority >= 55) {
+        if (consecutive >= 2) eligible = false;
+      } else if (priority >= 40) {
+        if (consecutive >= 1) eligible = false;
+      } else {
+        if (consecutive >= 1) eligible = false;
+      }
+      
+      if (eligible) {
+        eligibleMateriaIds.add(id);
+      }
+    });
+
+    const maxPerMateria = dailyMateriaLimit(maxItems, eligibleMateriaIds.size);
+    const markMateriaUsed = (materiaId) => {
+      const id = String(materiaId || '');
+      if (!id) return;
+      usedMateria.add(id);
+      materiaUseCount.set(id, (materiaUseCount.get(id) || 0) + 1);
+    };
+    const canUseMateria = (materiaId) => {
+      const id = String(materiaId || '');
+      return (materiaUseCount.get(id) || 0) < maxPerMateria;
+    };
+
+    // 1. Force schedule Tier 1 (Máxima) and Tier 2 (Alta Streak Continuation) subjects to guarantee study cadences
+    const forceCandidates = (materiasRows || [])
+      .filter(r => eligibleMateriaIds.has(String(r.materia.id)))
+      .map(r => {
+        const id = String(r.materia.id);
+        const consecutive = consecutiveDaysByMateria.get(id) || 0;
+        let forceTier = 0;
+        if (r.priority >= 70) {
+          forceTier = 1; // Máxima (always force daily)
+        } else if (r.priority >= 55 && consecutive < 2) {
+          forceTier = 2; // Alta Streak Continuation
+        }
+        return { row: r, forceTier };
+      })
+      .filter(item => item.forceTier > 0)
+      .sort((a, b) => a.forceTier - b.forceTier || b.row.priority - a.row.priority);
+
+    forceCandidates.forEach(item => {
+      if (items.length >= maxItems) return;
+      const idx = remaining.findIndex(u => String(u.materiaId) === String(item.row.materia.id) && unitFits(u, capacity, items.length > 0));
+      if (idx !== -1) {
+        const [unit] = remaining.splice(idx, 1);
+        unit.scheduleLane = 'core';
+        items.push(unit);
+        markMateriaUsed(unit.materiaId);
+        lastDayByMateria.set(unit.materiaId, studyDayIndex);
+        capacity -= unit.estimateMinutes;
+      }
+    });
+    
+    let safety = 0;
+    while (remaining.length && capacity >= 18 && items.length < maxItems && safety < 100) {
+      safety += 1;
+      
+      // Find all remaining units that fit the capacity and are eligible
+      let candidates = remaining.filter(unit => eligibleMateriaIds.has(String(unit.materiaId)) && unitFits(unit, capacity, items.length > 0));
+      if (!candidates.length) break;
+      const cappedCandidates = candidates.filter(unit => canUseMateria(unit.materiaId));
+      if (cappedCandidates.length) candidates = cappedCandidates;
+      
+      // Check which materias have units in candidates
+      const candidateMateriaIds = new Set(candidates.map(u => String(u.materiaId)));
+      
+      // Partition candidate materias into not-used and used
+      let targetMateriaIds = Array.from(candidateMateriaIds).filter(id => !usedMateria.has(id));
+      if (!targetMateriaIds.length) {
+        // If all eligible materias are already used today, allow reuse to fill capacity
+        targetMateriaIds = Array.from(candidateMateriaIds);
+      }
+      
+      // Calculate dueScore for each target materia
+      const targetMateriaRows = targetMateriaIds.map(materiaId => {
+        const last = lastDayByMateria.get(materiaId);
+        const gap = last === undefined ? 99 : (studyDayIndex - last);
+        const matRow = (materiasRows || []).find(r => String(r.materia.id) === String(materiaId));
+        const priority = matRow ? matRow.priority : 50;
+        
+        let targetInterval = 3.5;
+        if (priority >= 70) targetInterval = 1.0;
+        else if (priority >= 55) targetInterval = 1.5;
+        else if (priority >= 40) targetInterval = 2.0;
+        
+        const dueScore = gap / targetInterval;
+        return { materiaId, priority, dueScore };
+      });
+      
+      // Sort target materias:
+      // 1. By dueScore descending
+      // 2. By priority descending
+      targetMateriaRows.sort((a, b) => (b.dueScore - a.dueScore) || (b.priority - a.priority));
+      
+      const bestMateriaId = targetMateriaRows[0].materiaId;
+      
+      // Pick the highest priority unit from remaining for this bestMateriaId that fits capacity
+      const bestUnitIndex = remaining.findIndex(u => String(u.materiaId) === String(bestMateriaId) && unitFits(u, capacity, items.length > 0));
+      
+      if (bestUnitIndex === -1) {
+        break;
+      }
+      
+      const [unit] = remaining.splice(bestUnitIndex, 1);
+      const bestPriority = targetMateriaRows[0] ? targetMateriaRows[0].priority : 50;
+      unit.scheduleLane = bestPriority < 55 ? 'support' : 'core';
+      items.push(unit);
+      markMateriaUsed(unit.materiaId);
+      lastDayByMateria.set(unit.materiaId, studyDayIndex);
+      capacity -= unit.estimateMinutes;
+    }
+    
+    if (items.length) {
+      days.push({ date, key: dateKey(date), dayKey, hours, items });
+      studyDayIndex += 1;
+    }
+    
+    // Update consecutive study days streaks
+    (materiasRows || []).forEach(row => {
+      const id = String(row.materia.id);
+      if (usedMateria.has(id)) {
+        consecutiveDaysByMateria.set(id, (consecutiveDaysByMateria.get(id) || 0) + 1);
+      } else {
+        consecutiveDaysByMateria.set(id, 0);
+      }
+    });
+  }
+  
+  const scheduledUnits = days.reduce((acc, day) => acc + day.items.length, 0);
+  const studyDaysUsed = days.length;
+  const finishDate = days.length ? days[days.length - 1].date : null;
+  return {
+    days,
+    finishDate,
+    scheduledUnits,
+    studyDaysUsed,
+    avgUnitsPerStudyDay: studyDaysUsed ? scheduledUnits / studyDaysUsed : 0
+  };
+}
+
+function buildDiagnostic() {
+  if (config.agendadoSetupDone && !config.agendadoStartDate) {
+    config.agendadoStartDate = dateKey(new Date());
+    persistCronogramaConfig('cronograma-start-date-init', { immediate: true });
+  }
+
+  const concurso = CT.getConcurso(cId);
+  const allMaterias = CT.getMaterias(cId) || [];
+  const materias = getSelectedMaterias(allMaterias);
+  const partialMateriaSelection = materias.length > 0 && materias.length < allMaterias.length;
+  const allQuestions = CT.getQuestoes({ concursoId: cId }) || [];
+  const allSessions = CT.getSessoes({ concursoId: cId }) || [];
+  const historicalAvg = getHistoricalAvgMinutesPerTopic(allSessions);
+  const painel = getPainelMeta(materias);
+  const maxShare = Math.max(...materias.map(m => (painel.map.get(String(m.id)) || {}).share || 0), 0.01);
+  const units = [];
+
+  materias.forEach(materia => {
+    const topicos = CT.getTopicos(materia.id) || [];
+    if (!topicos.length) {
+      units.push({
+        id:'mat:' + materia.id,
+        tipo:'materia',
+        materiaId:materia.id,
+        materiaNome:materia.nome,
+        topicoId:null,
+        subtopId:null,
+        topicoNome:materia.nome,
+        subtopicoNome:'',
+        nome:materia.nome,
+        done:false,
+        doneAt:'',
+        minutes:config.minutosTopico
+      });
+      return;
+    }
+    topicos.forEach(topico => {
+      const subs = CT.getSubtopicos(topico.id) || [];
+      if (subs.length) {
+        subs.forEach(sub => {
+          units.push({
+            id:'sub:' + sub.id,
+            tipo:'subtopico',
+            materiaId:materia.id,
+            materiaNome:materia.nome,
+            topicoId:topico.id,
+            subtopId:sub.id,
+            topicoNome:topico.nome || 'Tópico',
+            subtopicoNome:sub.nome || 'Subtópico',
+            nome:sub.nome || 'Subtópico',
+            done:!!topico.estudado || !!sub.estudado,
+            doneAt:topico.estudadoEm || sub.estudadoEm || '',
+            minutes:config.minutosSubtopico
+          });
+        });
+      } else {
+        units.push({
+          id:'top:' + topico.id,
+          tipo:'topico',
+          materiaId:materia.id,
+          materiaNome:materia.nome,
+          topicoId:topico.id,
+          subtopId:null,
+          topicoNome:topico.nome || 'Tópico',
+          subtopicoNome:'',
+          nome:topico.nome || 'Tópico',
+          done:!!topico.estudado,
+          doneAt:topico.estudadoEm || '',
+          minutes:config.minutosTopico
+        });
+      }
+    });
+  });
+
+  units.forEach(unit => {
+    const qs = getUnitQuestions(allQuestions, unit);
+    const sessoes = getUnitSessions(allSessions, unit);
+    unit.questions = qs;
+    unit.general = CT.calcStats(qs);
+    unit.recent = calcRecentStats(qs, 30);
+    unit.signal = classifyPerformance(unit.general, unit.recent);
+    unit.seconds = CT.totalSegundos(sessoes);
+    unit.metricas = CT.somarMetricasSessoes ? CT.somarMetricasSessoes(sessoes) : { paginasPdf:0, videoMinutos:0 };
+    const meta = painel.map.get(String(unit.materiaId)) || { share: 0 };
+    unit.estimateMinutes = estimateUnitMinutes(unit, meta, maxShare, historicalAvg);
+    unit.loadPoints = unit.estimateMinutes / 45;
+    unit.minutes = unit.estimateMinutes;
+    const weightScore = ((meta.share || 0) / maxShare) * 34;
+    const difficultyBase = unit.recent.resolvidas >= 8 ? (100 - (unit.recent.pct || 0)) : (unit.general.pct != null ? 100 - unit.general.pct : 45);
+    const difficultyScore = Math.max(0, Math.min(28, difficultyBase * 0.28));
+    const coverageScore = unit.done ? 0 : 24;
+    const trendScore = ['dificuldade', 'queda'].includes(unit.signal.key) ? 12 : (unit.signal.key === 'recuperacao' ? 5 : 0);
+    unit.priority = Math.round(weightScore + difficultyScore + coverageScore + trendScore);
+  });
+
+  const materiasRows = materias.map(materia => {
+    const qs = allQuestions.filter(q => q.materiaId === materia.id);
+    const sessoes = allSessions.filter(s => s.materiaId === materia.id);
+    const materiaUnits = units.filter(u => u.materiaId === materia.id);
+    const meta = painel.map.get(String(materia.id)) || { share: 0, questoes: 0, pontos: 0 };
+    const general = CT.calcStats(qs);
+    const recent = calcRecentStats(qs, 30);
+    const signal = classifyPerformance(general, recent);
+    const doneUnits = materiaUnits.filter(u => u.done).length;
+    const totalUnits = materiaUnits.length;
+    const remainingUnits = Math.max(0, totalUnits - doneUnits);
+    const sim = getSimMateriaStats(materia.id);
+    const coveragePct = totalUnits ? Math.round((doneUnits / totalUnits) * 100) : 0;
+    
+    // Core weight and coverage scores
+    const weightScore = ((meta.share || 0) / maxShare) * 35;
+    const coverageScore = totalUnits ? (remainingUnits / totalUnits) * 25 : 12;
+    
+    // Questions performance: filter out scattered/random questions (require at least 10 overall)
+    const difficultyBase = general.resolvidas >= 10
+      ? (recent.resolvidas >= 8 ? (100 - (recent.pct || 0)) : (100 - (general.pct || 0)))
+      : 45; // Neutral baseline
+      
+    // Mock exams performance: high scores drop priority, low scores raise it
+    let simModifier = 0;
+    if (sim.ultimo != null) {
+      if (sim.ultimo >= 75) {
+        simModifier = -12;
+      } else if (sim.ultimo < 70) {
+        simModifier = 8;
+      }
+    }
+    
+    // Subject Affinity: maps comfort level to priority scoring offsets
+    const affinity = getMateriaAffinity(materia.id);
+    const affinityModifier = { 1: 15, 2: 7, 3: 0, 4: -7, 5: -15 }[affinity] || 0;
+    
+    let priority = Math.round(weightScore + coverageScore + Math.max(0, Math.min(25, difficultyBase * 0.25)) + simModifier + affinityModifier);
+    
+    // CAP and FLOOR rules for subjects with <= 5 questions in the exam panel
+    const hasFewQuestions = meta.questoes != null && meta.questoes > 0 && meta.questoes <= 5;
+    if (hasFewQuestions) {
+      // Must be AT MOST Prioridade Média (capped at 54)
+      priority = Math.min(54, priority);
+      
+      // CANNOT drop into Prioridade Baixa (< 40) unless affinity is 5 (Domino bem)
+      if (affinity < 5) {
+        priority = Math.max(40, priority);
+      }
+    }
+    const autoPriority = priority;
+    const manualPriority = getManualMateriaPriorityLevel(materia.id);
+    priority = applyManualMateriaPriority(materia.id, autoPriority);
+    return {
+      materia,
+      meta,
+      general,
+      recent,
+      signal,
+      sim,
+      seconds: CT.totalSegundos(sessoes),
+      totalUnits,
+      doneUnits,
+      remainingUnits,
+      coveragePct,
+      autoPriority,
+      manualPriority,
+      priority
+    };
+  }).sort((a, b) => b.priority - a.priority);
+
+  // Align unit priorities with their parent subject's calculated priority for total consistency
+  const materiaPriorityMap = new Map(materiasRows.map(r => [String(r.materia.id), r.priority]));
+  units.forEach(unit => {
+    const sPriority = materiaPriorityMap.get(String(unit.materiaId)) || 50;
+    unit.priority = sPriority;
+  });
+
+  const remainingUnits = units.filter(u => !u.done);
+  const remainingMinutes = remainingUnits.reduce((acc, unit) => acc + (unit.estimateMinutes || unit.minutes || 0), 0);
+  const remainingLoadPoints = remainingUnits.reduce((acc, unit) => acc + (unit.loadPoints || 0), 0);
+  const weeklyHours = totalWeeklyHours(config);
+  const weeklyMinutes = weeklyHours * 60;
+  const advanceMinutes = Math.max(0, weeklyMinutes * (1 - (config.revisaoPct / 100) - (config.questoesPct / 100)));
+  const weeklyStudyDays = DAY_LABELS.filter(day => (Number(config.horas[day.key]) || 0) > 0).length;
+  const schedule = config.tipo === 'agendado' ? buildAgendadoSchedule(remainingUnits, materiasRows) : null;
+  const paceSchedule = schedule || (config.tipo === 'ciclo' ? buildAgendadoSchedule(remainingUnits.map(unit => ({ ...unit })), materiasRows) : null);
+  const fallbackAvgUnitsPerStudyDay = (() => {
+    if (!remainingUnits.length || weeklyStudyDays <= 0 || weeklyMinutes <= 0 || remainingMinutes <= 0) return 0;
+    const averageStudyDayMinutes = weeklyMinutes / weeklyStudyDays;
+    const studyDaysNeeded = Math.ceil(remainingMinutes / averageStudyDayMinutes);
+    return studyDaysNeeded > 0 ? remainingUnits.length / studyDaysNeeded : 0;
+  })();
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const tomorrow = addDays(today, 1);
+  const daysToFinish = schedule ? daysBetween(today, schedule.finishDate) : (advanceMinutes > 0 ? Math.ceil(remainingMinutes / (advanceMinutes / 7)) : null);
+  const todayKeyName = JS_DAY_TO_KEY[new Date().getDay()];
+  const todayMinutes = (Number(config.horas[todayKeyName]) || 0) * 60;
+  const alerts = units.filter(u => ['dificuldade', 'queda', 'abaixo_meta'].includes(u.signal.key)).length;
+
+  let historyStart = today;
+  if (config.agendadoStartDate) {
+    const parts = config.agendadoStartDate.split('-').map(Number);
+    if (parts.length === 3) {
+      historyStart = new Date(parts[0], parts[1] - 1, parts[2]);
+      historyStart.setHours(0, 0, 0, 0);
+    }
+  }
+  const simUnits = units.map(u => {
+    let simDone = u.done;
+    let simPriority = u.priority;
+    if (u.done && u.doneAt) {
+      if (u.doneAt >= dateKey(historyStart)) {
+        simDone = false;
+        simPriority = u.priority + 24;
+      }
+    }
+    return { ...u, done: simDone, priority: simPriority };
+  });
+  const simRemainingUnits = simUnits.filter(u => !u.done);
+  const historySchedule = config.tipo === 'agendado' ? buildAgendadoScheduleFromDate(simRemainingUnits, materiasRows, historyStart, tomorrow) : null;
+
+  return {
+    concurso,
+    allMaterias,
+    materias: materiasRows,
+    units: units.sort((a, b) => b.priority - a.priority),
+    painel,
+    totalMateriasCount: allMaterias.length,
+    selectedMateriasCount: materias.length,
+    partialMateriaSelection,
+    totalUnits: units.length,
+    doneUnits: units.filter(u => u.done).length,
+    remainingUnits: remainingUnits.length,
+    remainingMinutes,
+    remainingLoadPoints,
+    weeklyHours,
+    weeklyMinutes,
+    advanceMinutes,
+    schedule,
+    avgUnitsPerStudyDay: paceSchedule && paceSchedule.avgUnitsPerStudyDay ? paceSchedule.avgUnitsPerStudyDay : fallbackAvgUnitsPerStudyDay,
+    weeklyStudyDays,
+    daysToFinish,
+    todayKeyName,
+    todayMinutes,
+    alerts,
+    historySchedule,
+    allSessions,
+    allQuestions,
+    maxShare,
+    historicalAvg,
+    painelMap: painel.map
+  };
+}
+
+function applySidebar(concurso) {
+  if (!concurso) return;
+  document.getElementById('sideNome').textContent = concurso.nome || '-';
+  document.getElementById('sideBanca').textContent = concurso.banca || '-';
+  const logoEl = document.getElementById('sideLogoImg');
+  if (logoEl) {
+    if (concurso.logoPath) logoEl.innerHTML = '<img src="' + concurso.logoPath + '?t=' + Date.now() + '" style="width:100%;height:100%;object-fit:cover;border-radius:5px">';
+    else if (concurso.logoBase64) logoEl.innerHTML = '<img src="' + concurso.logoBase64 + '" style="width:100%;height:100%;object-fit:cover;border-radius:5px">';
+    else if (concurso.logoEmoji) logoEl.textContent = concurso.logoEmoji;
+  }
+  const box = document.querySelector('.timer-box');
+  if (!box) return;
+  if (concurso.preEdital) {
+    const coberto = Number(concurso.coberto || 0);
+    const rocket = CT.renderCoverageRocket
+      ? CT.renderCoverageRocket(concurso, 30, 'vertical-align:0;')
+      : '<span aria-hidden="true" style="font-size:24px;line-height:1">&#128640;</span>';
+    box.style.padding = '12px 12px 10px';
+    box.innerHTML = ''
+      + '<div style="display:flex;flex-direction:column;align-items:center;gap:6px">'
+      +   '<div style="font-size:12px;font-weight:700;color:var(--accent2);text-transform:uppercase;letter-spacing:1.5px">&#10022; PRÉ-EDITAL</div>'
+      +   '<div style="display:flex;align-items:center;justify-content:center;gap:8px;font-size:16px;font-weight:600;color:var(--text3)">'
+      +     rocket
+      +     '<span style="color:var(--text)">coberto</span>'
+      +     '<span style="color:var(--accent2);font-weight:800">&times;' + coberto + '</span>'
+      +   '</div>'
+      + '</div>';
+    return;
+  }
+
+  const dias = CT.diasRestantes(concurso);
+  const cor = dias == null ? 'var(--accent)' : dias <= 7 ? 'var(--red)' : dias <= 30 ? 'var(--orange)' : 'var(--accent)';
+  const cobHtml = Number(concurso.coberto || 0) > 0
+    ? '<div style="margin-top:5px;border-top:1px solid var(--border);padding-top:5px;display:flex;flex-direction:column;align-items:center;">'
+      + '<div style="font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;letter-spacing:.5px">&#10022; Pós-Edital</div>'
+      + '<div style="font-size:11px;font-weight:600;color:var(--text3);display:inline-flex;align-items:center;gap:4px">'
+      + (CT.renderCoverageRocket ? CT.renderCoverageRocket(concurso, 18) : '<span aria-hidden="true">&#128640;</span>')
+      + ' Coberto <span style="color:var(--accent2)">&times;' + Number(concurso.coberto || 0) + '</span></div>'
+      + '</div>'
+    : '';
+  box.style.padding = '8px 10px';
+  box.innerHTML = '<div class="timer-num" id="sideTimer">' + (dias != null ? dias : '-') + '</div><div class="timer-label" id="sideTimerLabel">dias para a prova</div>' + cobHtml;
+  const timer = document.getElementById('sideTimer');
+  if (timer) timer.style.color = cor;
+}
+
+function renderConfigUi() {
+  const weekGrid = document.getElementById('weekGrid');
+  if (weekGrid) {
+    weekGrid.innerHTML = DAY_LABELS.map(day => {
+      const val = Number(config.horas[day.key]) || 0;
+      const displayVal = val > 0 ? formatDecimalToHourStr(val) : "";
+      return `
+        <div class="day-box">
+          <div class="day-label">${day.label}</div>
+          <input class="hour-input" 
+                 id="hour_${day.key}" 
+                 type="text" 
+                 placeholder="ex: 2h30" 
+                 value="${displayVal}"
+                 onfocus="this.select()"
+                 onclick="this.select()"
+                 onblur="onConfigHourBlur(this, '${day.key}')"
+                 style="text-align: center;">
+        </div>
+      `;
+    }).join('');
+  }
+}
+
+function renderSetupWeekGrid() {
+  return `
+    <div class="week-grid">
+      ${DAY_LABELS.map(day => {
+        const val = config.horas[day.key] ?? 0; // [R7-port D2] horas já salvas (flag setupHoursModified fica inerte — decisão Oodeus 2026-11-13)
+        const displayVal = val > 0 ? formatDecimalToHourStr(val) : "";
+        return `
+          <div class="day-box">
+            <div class="day-label">${day.label}</div>
+            <input class="hour-input" 
+                   id="setup_hour_${day.key}" 
+                   type="text" 
+                   placeholder="ex: 2h30" 
+                   value="${displayVal}"
+                   onfocus="this.select()"
+                   onclick="this.select()"
+                   onblur="onSetupHourBlur(this)"
+                   style="text-align: center;">
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+function affinityOptions(value) {
+  const options = [
+    { value:1, label:'Tenho muita dificuldade' },
+    { value:2, label:'Tenho dificuldade' },
+    { value:3, label:'Neutro' },
+    { value:4, label:'Tenho facilidade' },
+    { value:5, label:'Domino bem' }
+  ];
+  return options.map(opt => `<option value="${opt.value}" ${Number(value) === opt.value ? 'selected' : ''}>${opt.label}</option>`).join('');
+}
+
+function renderSetupProgress(step) {
+  const items = [
+    { n:1, label:'Passo 1', title:'Matérias' },
+    { n:2, label:'Passo 2', title:'Afinidade' },
+    { n:3, label:'Passo 3', title:'Prioridades' },
+    { n:4, label:'Passo 4', title:'Disponibilidade' }
+  ];
+  return `
+    <div class="setup-progress">
+      ${items.map(item => `
+        <div class="setup-progress-step ${item.n === step ? 'active' : (item.n < step ? 'done' : '')}">
+          <div class="setup-progress-label">${item.label}</div>
+          <div class="setup-progress-title">${item.title}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+}
+
+function renderAgendadoSetup() {
+  const el = document.getElementById('setupContent');
+  if (!el) return;
+  const step = clampNumber(config.agendadoSetupStep, 1, 4, 1);
+  const allMaterias = CT.getMaterias(cId) || [];
+  const allPainel = getPainelMeta(allMaterias);
+  const selectedMateriaCount = allMaterias.filter(materia => isMateriaSelected(materia.id)).length;
+  const subjectRows = allMaterias.map(materia => {
+    const meta = allPainel.map.get(String(materia.id)) || { questoes: 0, pontos: 0 };
+    const checked = isMateriaSelected(materia.id) ? 'checked' : '';
+    const topicsText = formatTopicCount(countMateriaStudyUnits(materia.id));
+    const questionsText = meta.questoes
+      ? Math.round(meta.questoes) + ' ' + (Math.round(meta.questoes) === 1 ? 'questão' : 'questões') + ' (' + Number((meta.pontos || 0).toFixed(2)).toString().replace('.', ',') + ' pts no painel)'
+      : 'sem questões no painel';
+    return `
+      <label class="subject-select-row">
+        <input type="checkbox" data-setup-materia="${escapeHtml(materia.id)}" ${checked} onchange="updateSetupMateriaCount()">
+        <div style="min-width:0">
+          <div class="subject-select-name">${escapeHtml(materia.nome)}</div>
+          <div class="subject-select-meta">${escapeHtml(topicsText + ' | ' + questionsText)}</div>
+        </div>
+      </label>
+    `;
+  }).join('');
+  const focusRows = state.materias.slice()
+    .sort((a, b) => ((b.meta.share || 0) - (a.meta.share || 0)) || (b.priority - a.priority));
+  const focusHtml = focusRows.length ? focusRows.map(row => {
+    const share = Math.round((row.meta.share || 0) * 100);
+    const shareText = share ? share + '% do peso estimado' : 'peso igual';
+    const topicsText = formatTopicCount(row.totalUnits);
+    const questionsText = row.meta.questoes
+      ? `<span class="q-highlight">${Math.round(row.meta.questoes)} ${Math.round(row.meta.questoes) === 1 ? 'questão' : 'questões'} | ${Number((row.meta.pontos || 0).toFixed(2)).toString().replace('.', ',')} pts no painel</span>`
+      : '';
+    const metaHtml = [
+      `<span>${escapeHtml(shareText)}</span>`,
+      `<span>${escapeHtml(topicsText)}</span>`,
+      questionsText
+    ].filter(Boolean).join(' <span class="meta-sep">|</span> ');
+    return `
+      <div class="focus-row">
+        <div style="min-width:0">
+          <div class="focus-name">${escapeHtml(row.materia.nome)}</div>
+          <div class="focus-meta">${metaHtml}</div>
+        </div>
+        <div class="focus-score ${priorityClass(row.priority)}">${priorityTierLabel(row.priority)}</div>
+      </div>
+    `;
+  }).join('') : '<div class="empty">Configure matérias e painel de prova para uma leitura mais precisa.</div>';
+
+  const affinityRows = state.materias.map(row => {
+    const current = getMateriaAffinity(row.materia.id);
+    const meta = [
+      formatTopicCount(row.totalUnits),
+      row.meta.questoes ? Math.round(row.meta.questoes) + ' ' + (Math.round(row.meta.questoes) === 1 ? 'questão' : 'questões') + ' (' + Number((row.meta.pontos || 0).toFixed(2)).toString().replace('.', ',') + ' pts)' : 'sem questões no painel',
+      row.general.resolvidas ? 'geral ' + pctText(row.general) : 'sem histórico'
+    ].join(' | ');
+    return `
+      <div class="affinity-row">
+        <div style="min-width:0">
+          <div class="affinity-name">${escapeHtml(row.materia.nome)}</div>
+          <div class="affinity-meta">${escapeHtml(meta)}</div>
+        </div>
+        <select class="affinity-select" data-setup-affinity="${escapeHtml(row.materia.id)}">
+          ${affinityOptions(current)}
+        </select>
+      </div>
+    `;
+  }).join('');
+  const steps = {
+    1: `
+      <section class="setup-card setup-step-card">
+        <div class="setup-card-head">
+          <div class="setup-card-title">Matérias que entram no plano</div>
+          <div class="setup-card-sub">Escolha quais matérias o Track deve organizar automaticamente. Por padrão todas entram no cronograma; as desmarcadas não serão sugeridas nem entram na estimativa.</div>
+        </div>
+        <div class="setup-card-body">
+          <div class="subject-select-tools">
+            <div class="subject-select-count" id="setupSubjectCount">${selectedMateriaCount}/${allMaterias.length} matérias selecionadas</div>
+            <div class="subject-select-actions">
+              <button class="btn" type="button" onclick="setSetupMaterias(true)">Selecionar todas</button>
+              <button class="btn" type="button" onclick="setSetupMaterias(false)">Limpar seleção</button>
+            </div>
+          </div>
+          <div class="subject-select-list">${subjectRows || '<div class="empty">Nenhuma matéria cadastrada.</div>'}</div>
+        </div>
+      </section>
+      <div class="setup-actions">
+        <button class="btn" type="button" onclick="voltarEscolhaCronograma()">Voltar</button>
+        <button class="btn primary" id="setupSubjectNext" type="button" onclick="avancarSetupAgendado(2)">Continuar</button>
+      </div>
+    `,
+    2: `
+      <section class="setup-card setup-step-card">
+        <div class="setup-card-head">
+          <div class="setup-card-title">Afinidade por matéria</div>
+          <div class="setup-card-sub">Ajuste o ${config.tipo === 'ciclo' ? 'ciclo de estudos' : 'cronograma'} ao seu nível real de conforto nas matérias selecionadas.</div>
+        </div>
+        <div class="setup-card-body">
+          <div class="affinity-list">${affinityRows || '<div class="empty">Selecione pelo menos uma matéria para continuar.</div>'}</div>
+        </div>
+      </section>
+      <div class="setup-actions">
+        <button class="btn" type="button" onclick="voltarSetupAgendado()">Voltar</button>
+        <button class="btn primary" type="button" onclick="avancarSetupAgendado(3)">Entendi, continuar</button>
+      </div>
+    `,
+    3: `
+      <section class="setup-card setup-step-card">
+        <div class="setup-card-head">
+          <div class="setup-card-title">Matérias que mais devem ter foco</div>
+          <div class="setup-card-sub">Análise inicial com base no Painel da Prova e suas estatísticas de resolução de questões/simulados; estas são as prioridades do recorte selecionado:</div>
+        </div>
+        <div class="setup-card-body">
+          <div class="focus-list">${focusHtml}</div>
+        </div>
+      </section>
+      <div class="setup-actions">
+        <button class="btn" type="button" onclick="voltarSetupAgendado()">Voltar</button>
+        <button class="btn primary" type="button" onclick="avancarSetupAgendado(4)">Entendi, continuar</button>
+      </div>
+    `,
+    4: `
+      <section class="setup-card setup-step-card">
+        <div class="setup-card-head">
+          <div class="setup-card-title">Disponibilidade real</div>
+          <div class="setup-card-sub">Agora informe em quais dias e quanto tempo você tem disponível para estudar.</div>
+        </div>
+        <div class="setup-card-body">
+          ${renderSetupWeekGrid()}
+        </div>
+      </section>
+      <div class="setup-actions">
+        <button class="btn" type="button" onclick="voltarSetupAgendado()">Voltar</button>
+        <button class="btn primary" type="button" onclick="salvarSetupAgendado()">${config.tipo === 'ciclo' ? 'Gerar Ciclo de Estudos' : 'Montar calendário'}</button>
+      </div>
+    `
+  };
+
+  const setupTitle = config.tipo === 'ciclo' ? 'Antes de gerar o Ciclo de Estudos' : 'Antes de montar o Cronograma Agendado';
+  const setupCopy = config.tipo === 'ciclo'
+    ? 'O Track Concursos monta o ciclo por tópicos das matérias selecionadas, usando suas respostas para entender prioridades, tempo disponível e dificuldade real de cada matéria.'
+    : 'O Track Concursos monta o calendário por tópicos das matérias selecionadas, usando suas respostas para entender prioridades, tempo disponível e dificuldade real de cada matéria.';
+
+  el.innerHTML = `
+    <div class="setup-shell">
+      <div class="setup-hero">
+        <div class="setup-title">${escapeHtml(setupTitle)}</div>
+        <div class="setup-copy">${escapeHtml(setupCopy)}</div>
+      </div>
+      ${renderSetupProgress(step)}
+      ${steps[step]}
+    </div>
+  `;
+  if (step === 1) updateSetupMateriaCount();
+}
+
+function collectSetupHours() {
+  const horas = {};
+  DAY_LABELS.forEach(day => {
+    const input = document.getElementById('setup_hour_' + day.key);
+    if (input) {
+      const parsed = parseHourStrToDecimal(input.value);
+      horas[day.key] = Math.max(0, Math.min(18, parsed));
+    } else {
+      horas[day.key] = Number(config.horas[day.key]) || 0;
+    }
+  });
+  return horas;
+}
+
+function collectSetupAffinity() {
+  const materiaAfinidade = { ...(config.materiaAfinidade || {}) };
+  document.querySelectorAll('[data-setup-affinity]').forEach(select => {
+    materiaAfinidade[select.dataset.setupAffinity] = clampNumber(select.value, 1, 5, 3);
+  });
+  return materiaAfinidade;
+}
+
+function getSetupMateriaBoxes() {
+  return Array.from(document.querySelectorAll('[data-setup-materia]'));
+}
+
+function collectSetupMateriaSelection() {
+  const boxes = getSetupMateriaBoxes();
+  if (!boxes.length) return { ...(config.materiasSelecionadas || {}) };
+  const selected = {};
+  boxes.forEach(box => {
+    const id = String(box.dataset.setupMateria || '');
+    if (id && !box.checked) selected[id] = false;
+  });
+  return selected;
+}
+
+function updateSetupMateriaCount() {
+  const boxes = getSetupMateriaBoxes();
+  const countEl = document.getElementById('setupSubjectCount');
+  const nextBtn = document.getElementById('setupSubjectNext');
+  if (!boxes.length) return;
+  const checked = boxes.filter(box => box.checked).length;
+  if (countEl) countEl.textContent = checked + '/' + boxes.length + ' matérias selecionadas';
+  if (nextBtn) {
+    nextBtn.disabled = checked <= 0;
+    nextBtn.title = checked <= 0 ? 'Selecione pelo menos uma matéria para continuar.' : '';
+  }
+}
+
+function setSetupMaterias(checked) {
+  getSetupMateriaBoxes().forEach(box => {
+    box.checked = !!checked;
+  });
+  updateSetupMateriaCount();
+}
+
+function collectSetupAvailability() {
+  return {
+    horas: collectSetupHours(),
+    ritmo: config.ritmo || 'equilibrado', // [R7-port D3] sem leitura do ID fantasma #setupRitmo
+    questoesPct: config.questoesPct // [R7-port D3] sem leitura do ID fantasma #setupQuestoes
+  };
+}
+
+function avancarSetupAgendado(nextStep) {
+  const current = clampNumber(config.agendadoSetupStep, 1, 4, 1);
+  const patch = {};
+  if (current === 1) {
+    const boxes = getSetupMateriaBoxes();
+    const selectedCount = boxes.filter(box => box.checked).length;
+    if (boxes.length && selectedCount <= 0) {
+      updateSetupMateriaCount();
+      showToast('Selecione pelo menos uma matéria para continuar.');
+      return;
+    }
+    patch.materiasSelecionadas = collectSetupMateriaSelection();
+  }
+  if (current === 2) patch.materiaAfinidade = collectSetupAffinity();
+  if (current === 4) Object.assign(patch, collectSetupAvailability());
+  config = {
+    ...config,
+    ...patch,
+    tipo: config.tipo || 'agendado',
+    agendadoSetupDone: false,
+    agendadoSetupStep: clampNumber(nextStep, 1, 4, current + 1)
+  };
+  persistCronogramaConfig('cronograma-setup-passo', { delay: 300 });
+  render();
+}
+
+function voltarSetupAgendado() {
+  const current = clampNumber(config.agendadoSetupStep, 1, 4, 1);
+  const patch = {};
+  if (current === 1) patch.materiasSelecionadas = collectSetupMateriaSelection();
+  if (current === 2) patch.materiaAfinidade = collectSetupAffinity();
+  if (current === 4) Object.assign(patch, collectSetupAvailability());
+  config = {
+    ...config,
+    ...patch,
+    tipo: config.tipo || 'agendado',
+    agendadoSetupDone: false,
+    agendadoSetupStep: Math.max(1, current - 1)
+  };
+  persistCronogramaConfig('cronograma-setup-voltar', { delay: 300 });
+  render();
+}
+
+function salvarSetupAgendado() {
+  setupHoursModified = false;
+  const materiaAfinidade = collectSetupAffinity();
+  const currentTipo = config.tipo || 'agendado';
+  config = {
+    ...config,
+    tipo: currentTipo,
+    agendadoSetupDone: true,
+    agendadoSetupStep: 4,
+    materiaAfinidade,
+    agendadoStartDate: dateKey(new Date()),
+    ...collectSetupAvailability()
+  };
+  calendarMonthOffset = 0;
+  clearDailySnapshotsFromToday();
+  
+  if (currentTipo === 'ciclo') {
+    const cid = cId;
+    try {
+      const cycleKey = 'ct_ciclo_' + cid;
+      localStorage.removeItem(cycleKey);
+    } catch(e){}
+
+    if (typeof window.setViewMode === 'function') {
+      window.setViewMode('cycle');
+    } else {
+      localStorage.setItem('ct_crono_modo_' + cId, 'cycle');
+      localStorage.setItem('ct_crono_modo_global', 'cycle');
+    }
+
+    localStorage.setItem('ct_cronograma_inteligente_' + cId, JSON.stringify(config));
+    if (window.CTCycle && typeof window.CTCycle.getData === 'function') {
+      window.CTCycle.getData();
+    }
+  } else if (currentTipo === 'agendado') {
+    if (typeof window.setViewMode === 'function') {
+      window.setViewMode('weekly');
+    } else {
+      localStorage.setItem('ct_crono_modo_' + cId, 'weekly');
+      localStorage.setItem('ct_crono_modo_global', 'weekly');
+    }
+  }
+
+  persistCronogramaConfig('cronograma-agendado-montado', { immediate: true });
+  const materiasDoPlano = getSelectedMaterias(CT.getMaterias(cId) || []);
+  const planoParcial = materiasDoPlano.length > 0 && materiasDoPlano.length < (CT.getMaterias(cId) || []).length;
+  showToast(currentTipo === 'ciclo'
+    ? (planoParcial ? 'Ciclo gerado para as matérias selecionadas.' : 'Ciclo de estudos gerado com base no edital e perfil.')
+    : (planoParcial ? 'Calendário montado para as matérias selecionadas.' : 'Calendário montado com base no edital e no seu perfil.'));
+  render();
+  if (typeof window.renderCrono === 'function') window.renderCrono();
+}
+
+function voltarEscolhaCronograma() {
+  setupHoursModified = false;
+  config = { ...config, tipo: '', agendadoSetupDone: false, agendadoSetupStep: 1 };
+  persistCronogramaConfig('cronograma-voltar-escolha', { delay: 300 });
+  render();
+}
+
+function renderPlanStrip() {
+  const el = document.getElementById('planStrip');
+  if (!el) return;
+  const isCiclo = config.tipo === 'ciclo';
+  const titulo = isCiclo ? 'Ciclo de Estudos' : 'Cronograma Agendado';
+  const parcial = !!(state && state.partialMateriaSelection);
+  const escopo = parcial ? 'as matérias selecionadas' : 'o edital';
+  const texto = isCiclo
+    ? 'Siga rodadas de matérias até cobrir ' + escopo + '. A estimativa usa suas horas semanais e os tópicos ainda não estudados.'
+    : 'Agenda diária por tópicos, ponderando peso da matéria, afinidade e desempenho. As horas só definem o que cabe em cada dia.';
+  const selectionNote = parcial ? `
+    <div style="font-size:12px;color:var(--text3);line-height:1.45;margin-top:10px;background:rgba(79,142,247,.06);border:1px solid rgba(79,142,247,.18);border-radius:10px;padding:10px 12px;">
+      Plano limitado a ${state.selectedMateriasCount}/${state.totalMateriasCount} matérias. As demais não entram nas sugestões nem na estimativa.
+    </div>
+  ` : '';
+  const cicloExplicacao = isCiclo ? `
+    <div style="font-size:12px;color:var(--text3);line-height:1.5;margin-top:10px;margin-bottom:8px;background:rgba(255,255,255,0.02);border:1px solid var(--border);border-radius:10px;padding:12px;">
+      <span style="display:block;margin-bottom:6px;font-weight:800;color:var(--text2)">ℹ️ COMO FUNCIONAM OS MODOS DO CICLO:</span>
+      • <b>Sugerido pelo Track:</b> O Track Concursos analisa a prioridade de cada matéria e a sua carga horária semanal para dividir o tempo proporcionalmente (matérias de baixa prioridade recebem 0h30). Caso o tempo recomendado de uma matéria seja muito longo, a carga é dividida em sessões de no máximo 2h e espaçada no ciclo para intercalar os estudos de forma inteligente. No dashboard, o card atual do ciclo já exibirá um tópico sugerido ${parcial ? 'das matérias selecionadas' : 'do edital'} para acesso e estudo direto.<br>
+      • <b>Livre:</b> As matérias são inseridas sem metas de tempo ("a definir") e você personaliza livremente a carga horária de cada sessão do ciclo.
+    </div>
+  ` : '';
+  const cicloToggle = isCiclo ? `
+    <div class="cycle-toggle">
+      <button type="button" class="${config.cicloModo !== 'livre' ? 'active' : ''}" onclick="setCicloModo('sugerido')">Sugerido pelo Track</button>
+      <button type="button" class="${config.cicloModo === 'livre' ? 'active' : ''}" onclick="setCicloModo('livre')">Livre</button>
+    </div>
+  ` : '';
+  el.innerHTML = `
+    <div>
+      <div class="plan-label">Formato escolhido</div>
+      <div class="plan-title">${titulo}</div>
+      <div class="plan-copy">${texto}</div>
+      ${selectionNote}
+      ${cicloExplicacao}
+      ${cicloToggle}
+    </div>
+    <button class="btn" type="button" onclick="alterarTipoCronograma()">Alterar formato</button>
+  `;
+}
+
+function renderSummary() {
+  const dias = state.daysToFinish;
+  const usesTopicPace = config.tipo === 'agendado' || config.tipo === 'ciclo';
+  const parcial = !!state.partialMateriaSelection;
+  const escopo = parcial ? 'as matérias selecionadas' : 'o edital';
+  const escopoRestante = parcial ? 'matérias selecionadas restantes' : 'edital restante';
+  document.getElementById('sumEstimate').textContent = dias == null ? '-' : dias + ' dias';
+  const estimateLabel = document.getElementById('sumEstimate')?.parentElement?.querySelector('.summary-label');
+  if (estimateLabel) estimateLabel.textContent = parcial ? 'Estimativa de conclusão das matérias selecionadas' : 'Estimativa de fechamento de edital';
+  const remainingLabel = document.getElementById('sumRemaining')?.parentElement?.querySelector('.summary-label');
+  if (remainingLabel) remainingLabel.textContent = escopoRestante;
+  const finishDate = dias != null ? new Date(Date.now() + dias * 86400000) : null;
+  const avgHours = state.weeklyStudyDays ? (state.weeklyHours / state.weeklyStudyDays) : 0;
+  const recTopics = Math.round(avgHours) || 5;
+
+  const concurso = CT.getConcurso(cId);
+  const hasProvaDate = concurso && concurso.dataProva;
+  let isPostEdital = false;
+  let daysUntilProva = null;
+  if (hasProvaDate) {
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    const provaDate = new Date(concurso.dataProva);
+    provaDate.setHours(0,0,0,0);
+    daysUntilProva = Math.ceil((provaDate.getTime() - today.getTime()) / 86400000);
+    if (daysUntilProva >= 0) {
+      isPostEdital = true;
+    }
+  }
+
+  // Dynamically highlight completion estimate card based on exam schedule risk
+  const estimateCard = document.getElementById('sumEstimate')?.parentElement;
+  if (estimateCard) {
+    estimateCard.className = 'summary-card green'; // Default reset
+  }
+
+  let estimateNoteText = '';
+  let weeklyNoteText = '';
+
+  if (isPostEdital && dias != null) {
+    const daysForRevision = daysUntilProva - dias;
+    const formattedProvaDate = formatDateBR(new Date(concurso.dataProva));
+    
+    if (daysForRevision > 0) {
+      estimateNoteText = `Sua estimativa de conclusão é de ${dias} dias. Sobrarão ${daysForRevision} dias para revisão pesada e simulados até o dia da prova (${formattedProvaDate})!`;
+      if (estimateCard) {
+        if (daysForRevision >= 15) {
+          estimateCard.className = 'summary-card green';
+        } else {
+          estimateCard.className = 'summary-card yellow';
+        }
+      }
+    } else if (daysForRevision === 0) {
+      estimateNoteText = `Estimativa de conclusão em ${dias} dias, exatamente na data da prova (${formattedProvaDate})! Aumente um pouco as horas semanais para ter dias de revisão.`;
+      if (estimateCard) estimateCard.className = 'summary-card yellow';
+    } else {
+      estimateNoteText = `⚠️ Atenção: Faltam ${daysUntilProva} dias para a prova, mas são necessários ${dias} dias para cobrir ${escopo}. Atraso de ${Math.abs(daysForRevision)} dias para revisão.`;
+      if (estimateCard) estimateCard.className = 'summary-card red';
+    }
+    
+    // Custom post-edital study rhythm advice with safe margin limits
+    let margin = 10;
+    if (daysUntilProva > 60) margin = 30;
+    else if (daysUntilProva > 30) margin = 15;
+    else if (daysUntilProva <= 10) margin = 0;
+    
+    const targetDays = Math.max(1, daysUntilProva - margin);
+    const neededTopicsPerDay = Math.ceil(state.remainingUnits / targetDays);
+    
+    if (neededTopicsPerDay <= 0) {
+      weeklyNoteText = parcial
+        ? `Matérias selecionadas já concluídas! Foco total em revisões e simulados até a prova em ${formattedProvaDate}.`
+        : `Edital já concluído! Foco total em revisões e simulados até a prova em ${formattedProvaDate}.`;
+    } else if (neededTopicsPerDay <= 4) {
+      weeklyNoteText = `Sugestão pós-edital: ${neededTopicsPerDay} ${neededTopicsPerDay === 1 ? 'tópico/dia de estudo' : 'tópicos/dia de estudo'} para fechar 100% ${parcial ? 'das matérias selecionadas' : 'do edital'} com ${margin} dias de folga para revisão.`;
+    } else {
+      weeklyNoteText = `Meta pós-edital: seria necessário ${neededTopicsPerDay} tópicos/dia de estudo para folga de ${margin} dias. Sugerimos focar no máximo em 3 a 4 tópicos/dia de estudo para manter a qualidade.`;
+    }
+  } else {
+    // Standard pre-edital copy
+    estimateNoteText = dias == null
+      ? 'Defina horas semanais para calcular.'
+      : (config.tipo === 'agendado'
+        ? (parcial ? 'Conclusão das matérias selecionadas estimada pelo calendário em ' : 'Fechamento estimado pelo calendário em ') + formatDateBR(finishDate) + '. Atualizado automaticamente conforme você finaliza tópicos.'
+        : 'Conclusão estimada em ' + formatDateBR(finishDate) + '.');
+      
+    weeklyNoteText = config.tipo === 'agendado'
+      ? `Ritmo real planejado no calendário com base nas suas horas de estudo e peso das matérias.`
+      : (config.tipo === 'ciclo'
+        ? `Ritmo calculado pelo ciclo com base nos seus dias de estudo, tempo disponível e peso das matérias.`
+        : formatMinutes(state.advanceMinutes) + ' livres para avanço de ' + escopo + '.');
+  }
+
+  document.getElementById('sumEstimateNote').textContent = estimateNoteText;
+  
+  document.getElementById('sumWeekly').textContent = usesTopicPace
+    ? (state.avgUnitsPerStudyDay || 0).toFixed(1) + ' tópicos/dia de estudo'
+    : formatHours(state.weeklyHours);
+    
+  document.getElementById('sumWeeklyNote').textContent = weeklyNoteText;
+  
+  document.getElementById('sumRemaining').textContent = state.remainingUnits + '/' + state.totalUnits;
+  document.getElementById('sumRemainingNote').textContent = config.tipo === 'agendado'
+    ? formatTopicCount(state.remainingUnits) + (parcial ? ' ainda abertos nas matérias selecionadas.' : ' ainda abertos, ponderados por peso e afinidade.')
+    : formatMinutes(state.remainingMinutes) + (parcial ? ' estimados para concluir o recorte selecionado.' : ' estimados para cobrir o restante.');
+  const criticalAlertsCount = state.units.filter(u => ['dificuldade', 'queda'].includes(u.signal.key)).length;
+  const customAlertsCount = state.units.filter(u => u.signal.key === 'abaixo_meta').length;
+  const totalAlertsCount = criticalAlertsCount + customAlertsCount;
+
+  document.getElementById('sumAlerts').textContent = String(totalAlertsCount);
+  
+  const alertsCard = document.getElementById('focusAlertsCard');
+  if (alertsCard) {
+    if (criticalAlertsCount > 0) {
+      alertsCard.className = 'summary-card red clickable';
+      document.getElementById('sumAlertsNote').textContent = 'Tópicos com queda ou desempenho crítico.';
+    } else if (customAlertsCount > 0) {
+      alertsCard.className = 'summary-card yellow clickable';
+      document.getElementById('sumAlertsNote').textContent = 'Tópicos abaixo da meta de desempenho.';
+    } else {
+      alertsCard.className = 'summary-card green clickable';
+      document.getElementById('sumAlertsNote').textContent = 'Nenhum alerta de foco no momento.';
+    }
+  } else {
+    document.getElementById('sumAlertsNote').textContent = totalAlertsCount ? 'Tópicos com queda ou desempenho baixo.' : 'Nenhum alerta forte até agora.';
+  }
+}
+
+function changeCalendarMonth(delta) {
+  calendarMonthOffset += delta;
+  renderCalendar();
+}
+
+function renderCalendar() {
+  const card = document.getElementById('calendarCard');
+  if (!card) return;
+  if (config.tipo !== 'agendado') {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+  const grid = document.getElementById('calendarGrid');
+  const title = document.getElementById('calendarTitle');
+  const sub = document.getElementById('calendarSub');
+  const base = new Date();
+  base.setDate(1);
+  base.setHours(0, 0, 0, 0);
+  base.setMonth(base.getMonth() + calendarMonthOffset);
+  const month = base.getMonth();
+  const year = base.getFullYear();
+  const first = new Date(year, month, 1);
+  const last = new Date(year, month + 1, 0);
+  const todayKey = dateKey(new Date());
+  const scheduleMap = new Map((state.schedule?.days || []).map(day => [day.key, day]));
+  const week = [
+    { key:'seg', label:'Seg' },
+    { key:'ter', label:'Ter' },
+    { key:'qua', label:'Qua' },
+    { key:'qui', label:'Qui' },
+    { key:'sex', label:'Sex' },
+    { key:'sab', label:'Sáb' },
+    { key:'dom', label:'Dom' }
+  ];
+  title.textContent = base.toLocaleDateString('pt-BR', { month:'long', year:'numeric' });
+  sub.textContent = state.schedule?.finishDate
+    ? formatTopicCount(state.remainingUnits) + ' restantes; previsão de fechar 1x em ' + formatDateBR(state.schedule.finishDate) + '.'
+    : 'Sem previsão: ajuste os dias disponíveis ou cadastre tópicos no edital.';
+  const blanks = (first.getDay() + 6) % 7;
+  const cells = week.map(day => `<div class="calendar-weekday">${day.label}</div>`);
+  for (let i = 0; i < blanks; i++) {
+    cells.push('<div class="calendar-day muted"></div>');
+  }
+  for (let dayNum = 1; dayNum <= last.getDate(); dayNum++) {
+    const date = new Date(year, month, dayNum);
+    const key = dateKey(date);
+    const dayKey = JS_DAY_TO_KEY[date.getDay()];
+    const hours = Number(config.horas[dayKey]) || 0;
+    const scheduled = scheduleMap.get(key);
+    
+    const isPast = (key <= todayKey);
+    let items = [];
+    
+    if (isPast) {
+      const isBeforeStart = config.agendadoStartDate && (key < config.agendadoStartDate);
+      if (isBeforeStart) {
+        items = [];
+      } else {
+        const histDay = state.historySchedule ? (state.historySchedule.days || []).find(d => d.key === key) : null;
+        const snapshotItems = getCalendarSnapshotItems(key);
+        const computedItems = histDay ? histDay.items : [];
+        const histItems = snapshotItems && !calendarSnapshotHasExtraCompletion(snapshotItems, computedItems, key)
+          ? snapshotItems
+          : computedItems;
+        
+        const histMapped = histItems.map(item => {
+          const realUnit = state.units.find(u => u.id === item.id);
+          const doneOnDay = realUnit && realUnit.done && realUnit.doneAt === key;
+          
+          const hasSession = state.allSessions.some(s => {
+            const sDate = getEntryDateKey(s);
+            const matches = item.subtopId
+              ? (String(s.subtopId || s.subtopicoId || '') === String(item.subtopId) || (String(s.topicoId || '') === String(item.topicoId) && !(s.subtopId || s.subtopicoId)))
+              : (String(s.topicoId || '') === String(item.topicoId));
+            return sDate === key && matches;
+          });
+          const hasQuestions = state.allQuestions.some(q => {
+            const qDate = getEntryDateKey(q);
+            const matches = item.subtopId
+              ? (String(q.subtopId || q.subtopicoId || '') === String(item.subtopId) || (String(q.topicoId || '') === String(item.topicoId) && !(q.subtopId || q.subtopicoId)))
+              : (String(q.topicoId || '') === String(item.topicoId));
+            return qDate === key && matches;
+          });
+          const studied = hasSession || hasQuestions;
+
+          let status = key === todayKey ? 'today_pending' : 'not_studied';
+          let warning = key === todayKey ? TODAY_PENDING_WARNING : 'Não estudado, continuará no próximo dia.';
+          if (doneOnDay) {
+            status = 'finalized';
+            warning = 'Tópico concluído!';
+          } else if (studied) {
+            status = 'studied_not_finalized';
+            warning = 'Tópico não finalizado, continuará no próximo dia de estudo.';
+          }
+          
+          return { ...item, pastOutcome: status, pastWarning: warning };
+        });
+        
+        const histIds = calendarScheduledKeys(histItems);
+        const extraItems = state.units.filter(u => {
+          if (!(u.done && u.doneAt === key)) return false;
+          const unitKey = calendarScheduleItemKey(u);
+          return !histIds.has(String(u.id || '')) && (!unitKey || !histIds.has(unitKey));
+        }).map(u => {
+          return {
+            id: u.id,
+            materiaId: u.materiaId,
+            materiaNome: u.materiaNome,
+            topicoId: u.topicoId,
+            subtopId: u.subtopId,
+            topicoNome: u.topicoNome,
+            subtopicoNome: u.subtopicoNome,
+            nome: u.nome,
+            estimateMinutes: u.estimateMinutes || u.minutes || 0,
+            scheduleLane: 'core',
+            pastOutcome: 'extra_finalized',
+            pastWarning: 'Estudo Extra Concluído! 🔥'
+          };
+        });
+        
+        items = histMapped.concat(extraItems);
+      }
+    } else {
+      items = scheduled?.items || [];
+    }
+
+    const className = [
+      'calendar-day',
+      key === todayKey ? 'today' : '',
+      hours <= 0 ? 'off' : ''
+    ].filter(Boolean).join(' ');
+    
+    const itemsHtml = items.slice(0, 3).map(unit => {
+      let itemClass = ['calendar-item'];
+      let titleText = '';
+      if (unit.pastOutcome) {
+        titleText = unit.pastWarning;
+        if (unit.pastOutcome === 'finalized') itemClass.push('finalized-past');
+        else if (unit.pastOutcome === 'studied_not_finalized') itemClass.push('studied-past');
+        else if (unit.pastOutcome === 'not_studied') itemClass.push('unstudied-past');
+        else if (unit.pastOutcome === 'today_pending') itemClass.push('pending-today');
+        else if (unit.pastOutcome === 'extra_finalized') itemClass.push('extra-past');
+      } else {
+        itemClass.push(calendarUnitClass(unit));
+      }
+      
+      return `
+        <div class="${itemClass.join(' ')}" title="${escapeHtml(titleText || unitStudyName(unit))}">
+          <div class="calendar-mat">${escapeHtml(unit.materiaNome)}</div>
+          <div class="calendar-topic">${escapeHtml(unitStudyName(unit))}</div>
+        </div>
+      `;
+    }).join('');
+    
+    const more = items.length > 3 ? `<div class="calendar-more">+${formatTopicCount(items.length - 3)}</div>` : '';
+    cells.push(`
+      <div class="${className}" role="button" tabindex="0" onclick="openCalendarDay('${key}')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();openCalendarDay('${key}')}">
+        <div class="calendar-date">
+          <span>${dayNum}</span>
+          <span class="calendar-hours">${hours ? formatHours(hours) : 'folga'}</span>
+        </div>
+        <div class="calendar-items">${itemsHtml}${more}</div>
+      </div>
+    `);
+  }
+  grid.innerHTML = cells.join('');
+}
+
+function calendarUnitClass(unit) {
+  if (!unit) return '';
+  if (unit.priority >= 70) return 'important';
+  if (unit.priority >= 55) return 'warning';
+  if (unit.priority >= 40) return 'support';
+  return '';
+}
+
+function openCalendarDay(dayKey) {
+  if (!state) return;
+  const modal = document.getElementById('dayModal');
+  const title = document.getElementById('dayModalTitle');
+  const sub = document.getElementById('dayModalSub');
+  const body = document.getElementById('dayModalBody');
+  if (!modal || !title || !sub || !body) return;
+  
+  const todayKey = dateKey(new Date());
+  const isPast = (dayKey <= todayKey);
+  let items = [];
+  
+  if (isPast) {
+    const isBeforeStart = config.agendadoStartDate && (dayKey < config.agendadoStartDate);
+    if (isBeforeStart) {
+      items = [];
+    } else {
+      const histDay = state.historySchedule ? (state.historySchedule.days || []).find(d => d.key === dayKey) : null;
+      const snapshotItems = getCalendarSnapshotItems(dayKey);
+      const computedItems = histDay ? histDay.items : [];
+      const histItems = snapshotItems && !calendarSnapshotHasExtraCompletion(snapshotItems, computedItems, dayKey)
+        ? snapshotItems
+        : computedItems;
+      
+      const histMapped = histItems.map(item => {
+        const realUnit = state.units.find(u => u.id === item.id);
+        const doneOnDay = realUnit && realUnit.done && realUnit.doneAt === dayKey;
+        
+        const hasSession = state.allSessions.some(s => {
+          const sDate = getEntryDateKey(s);
+          const matches = item.subtopId
+            ? (String(s.subtopId || s.subtopicoId || '') === String(item.subtopId) || (String(s.topicoId || '') === String(item.topicoId) && !(s.subtopId || s.subtopicoId)))
+            : (String(s.topicoId || '') === String(item.topicoId));
+          return sDate === dayKey && matches;
+        });
+        const hasQuestions = state.allQuestions.some(q => {
+          const qDate = getEntryDateKey(q);
+          const matches = item.subtopId
+            ? (String(q.subtopId || q.subtopicoId || '') === String(item.subtopId) || (String(q.topicoId || '') === String(item.topicoId) && !(q.subtopId || q.subtopicoId)))
+            : (String(q.topicoId || '') === String(item.topicoId));
+          return qDate === dayKey && matches;
+        });
+        const studied = hasSession || hasQuestions;
+
+        let status = dayKey === todayKey ? 'today_pending' : 'not_studied';
+        let warning = dayKey === todayKey ? TODAY_PENDING_WARNING : 'Não estudado, continuará no próximo dia.';
+        if (doneOnDay) {
+          status = 'finalized';
+          warning = 'Tópico concluído!';
+        } else if (studied) {
+          status = 'studied_not_finalized';
+          warning = 'Tópico não finalizado, continuará no próximo dia de estudo.';
+        }
+        
+        return { ...item, pastOutcome: status, pastWarning: warning };
+      });
+      
+      const histIds = calendarScheduledKeys(histItems);
+      const extraItems = state.units.filter(u => {
+        if (!(u.done && u.doneAt === dayKey)) return false;
+        const unitKey = calendarScheduleItemKey(u);
+        return !histIds.has(String(u.id || '')) && (!unitKey || !histIds.has(unitKey));
+      }).map(u => {
+        return {
+          id: u.id,
+          materiaId: u.materiaId,
+          materiaNome: u.materiaNome,
+          topicoId: u.topicoId,
+          subtopId: u.subtopId,
+          topicoNome: u.topicoNome,
+          subtopicoNome: u.subtopicoNome,
+          nome: u.nome,
+          estimateMinutes: u.estimateMinutes || u.minutes || 0,
+          scheduleLane: 'core',
+          pastOutcome: 'extra_finalized',
+          pastWarning: 'Estudo Extra Concluído! 🔥'
+        };
+      });
+      
+      items = histMapped.concat(extraItems);
+    }
+  } else {
+    const day = (state.schedule?.days || []).find(item => item.key === dayKey);
+    items = day?.items || [];
+  }
+
+  const parts = String(dayKey || '').split('-').map(Number);
+  const date = parts.length === 3 ? new Date(parts[0], parts[1] - 1, parts[2]) : null;
+  const dayName = date && !Number.isNaN(date.getTime())
+    ? date.toLocaleDateString('pt-BR', { weekday:'long', day:'2-digit', month:'long' })
+    : 'Detalhes do dia';
+  const jsDayKey = date && !Number.isNaN(date.getTime()) ? JS_DAY_TO_KEY[date.getDay()] : '';
+  const hours = !isPast && (state.schedule?.days || []).find(item => item.key === dayKey) ? (state.schedule?.days || []).find(item => item.key === dayKey).hours : (Number(config.horas[jsDayKey]) || 0);
+  const supportCount = items.filter(unit => unit.scheduleLane === 'support').length;
+
+  title.textContent = dayName.charAt(0).toUpperCase() + dayName.slice(1);
+  sub.textContent = [
+    hours ? formatHours(hours) + ' configuradas' : 'dia sem estudo configurado',
+    items.length ? formatTopicCount(items.length) : 'nenhum tópico agendado'
+  ].filter(Boolean).join(' | ');
+
+  if (!items.length) {
+    body.innerHTML = '<div class="empty">Nenhum tópico agendado para este dia.</div>';
+  } else {
+    body.innerHTML = `
+      <div class="day-detail-list">
+        ${items.map(unit => {
+          const cls = unit.pastOutcome
+            ? (unit.pastOutcome === 'finalized' ? 'finalized-past' : unit.pastOutcome === 'studied_not_finalized' ? 'studied-past' : unit.pastOutcome === 'not_studied' ? 'unstudied-past' : unit.pastOutcome === 'today_pending' ? 'pending-today' : 'extra-past')
+            : calendarUnitClass(unit);
+          let pastMessageHtml = '';
+          if (unit.pastOutcome) {
+            let color = 'var(--text3)';
+            if (unit.pastOutcome === 'finalized') color = 'var(--green)';
+            else if (unit.pastOutcome === 'studied_not_finalized') color = 'var(--orange)';
+            else if (unit.pastOutcome === 'not_studied') color = 'var(--red)';
+            else if (unit.pastOutcome === 'today_pending') color = 'var(--accent)';
+            else if (unit.pastOutcome === 'extra_finalized') color = '#ffd700';
+            
+            pastMessageHtml = `<div style="margin-top: 6px; font-size: 11px; font-weight: 700; color: ${color};">${escapeHtml(unit.pastWarning)}</div>`;
+          }
+          const metaHtml = `<span class="${priorityClass(unit.priority)}" style="font-weight:900;text-transform:uppercase;letter-spacing:.5px">${escapeHtml(priorityTierLabel(unit.priority))}</span>`;
+          
+          const pillsHtml = (unit.recent && unit.general && unit.signal) ? statPills(unit) : '';
+          return `
+            <div class="day-detail-item ${cls}">
+              <div class="day-detail-top">
+                <div style="min-width:0">
+                  <div class="day-detail-mat">${escapeHtml(unit.materiaNome)}</div>
+                  <div class="day-detail-topic">${escapeHtml(unitStudyName(unit))}</div>
+                </div>
+              </div>
+              <div class="day-detail-meta">${metaHtml}</div>
+              ${pastMessageHtml}
+              ${pillsHtml}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+  modal.classList.add('visible');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeCalendarDay(event) {
+  if (event && event.target && event.currentTarget && event.target !== event.currentTarget) return;
+  const modal = document.getElementById('dayModal');
+  if (!modal) return;
+  modal.classList.remove('visible');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function pctText(stats) {
+  return stats && stats.pct != null ? stats.pct + '%' : '-';
+}
+
+function unitStudyName(unit) {
+  if (!unit) return '';
+  return unit.subtopId
+    ? (unit.subtopicoNome || unit.nome || 'Subtópico')
+    : (unit.topicoNome || unit.nome || 'Tópico');
+}
+
+function statPills(row) {
+  const recentLabel = row.recent.resolvidas ? 'Últimas ' + row.recent.resolvidas + ': ' + pctText(row.recent) : 'Sem recentes';
+  const generalLabel = row.general.resolvidas ? 'Geral: ' + pctText(row.general) : 'Sem questões';
+  const cls = row.signal.className === 'warning' ? 'red' : row.signal.className === 'drop' ? 'yellow' : row.signal.className === 'recovery' || row.signal.className === 'dominate' ? 'green' : '';
+  return '<div class="q-perf-box">'
+    + '<div class="q-perf-title">Desempenho em questões</div>'
+    + '<div class="pill-row">'
+    + '<span class="pill">' + escapeHtml(generalLabel) + '</span>'
+    + '<span class="pill ' + cls + '">' + escapeHtml(recentLabel) + '</span>'
+    + '<span class="signal ' + row.signal.className + '">' + escapeHtml(row.signal.label) + '</span>'
+    + '</div>'
+    + '</div>';
+}
+
+function combineQuestionStats(questionGroups) {
+  const questoes = (questionGroups || []).flat().filter(Boolean);
+  const general = CT.calcStats(questoes);
+  const recent = calcRecentStats(questoes, 30);
+  return { general, recent, signal: classifyPerformance(general, recent) };
+}
+
+function renderMiniStats(row) {
+  const recentes = row.recent.resolvidas ? 'Últ. ' + row.recent.resolvidas + ': ' + pctText(row.recent) : 'Sem recentes';
+  const geral = row.general.resolvidas ? 'Geral: ' + pctText(row.general) : 'Sem questões';
+  const cls = row.signal.className === 'warning' ? 'red' : row.signal.className === 'drop' ? 'yellow' : row.signal.className === 'recovery' || row.signal.className === 'dominate' ? 'green' : '';
+  return `
+    <div class="topic-mini-stats">
+      <span class="pill">${escapeHtml(geral)}</span>
+      <span class="pill ${cls}">${escapeHtml(recentes)}</span>
+    </div>
+  `;
+}
+
+function buildMateriaBreakdown(row) {
+  const materiaUnits = state.units.filter(unit => unit.materiaId === row.materia.id);
+  if (!materiaUnits.length) {
+    return '<div class="empty">Nenhum tópico cadastrado nessa matéria.</div>';
+  }
+  const groups = new Map();
+  materiaUnits.forEach(unit => {
+    const groupKey = unit.topicoId || unit.id;
+    if (!groups.has(groupKey)) {
+      groups.set(groupKey, {
+        key: groupKey,
+        nome: unit.topicoNome || unit.nome || 'Tópico',
+        units: []
+      });
+    }
+    groups.get(groupKey).units.push(unit);
+  });
+
+  return Array.from(groups.values()).map(group => {
+    const allDone = group.units.length > 0 && group.units.every(unit => unit.done);
+    const stats = combineQuestionStats(group.units.map(unit => unit.questions || []));
+    const hasSubtopicos = group.units.some(unit => unit.subtopId);
+    const subList = hasSubtopicos ? `
+      <div class="sub-mini-list">
+        ${group.units.map(unit => {
+          const subName = unit.subtopicoNome || unit.nome || 'Subtópico';
+          return `
+            <div class="sub-mini ${unit.done ? 'done' : ''}">
+              <div class="sub-mini-name">${escapeHtml(subName)}</div>
+              ${renderMiniStats(unit)}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    ` : '';
+    return `
+      <div class="topic-mini ${allDone ? 'done' : ''}">
+        <div class="topic-mini-head">
+          <div class="topic-mini-name">${escapeHtml(group.nome)}</div>
+          ${renderMiniStats(stats)}
+        </div>
+        ${subList}
+      </div>
+    `;
+  }).join('');
+}
+
+function renderMateriaList() {
+  const list = document.getElementById('materiaList');
+  if (!state.materias.length) {
+    list.innerHTML = '<div class="empty">Nenhuma matéria cadastrada neste concurso.</div>';
+    return;
+  }
+  list.innerHTML = state.materias.slice().map(row => {
+    const metaParts = [
+      row.totalUnits ? row.doneUnits + '/' + row.totalUnits + (state.partialMateriaSelection ? ' tópicos selecionados' : ' tópicos do edital') : 'sem tópicos',
+      row.meta.questoes ? Math.round(row.meta.questoes) + ' ' + (Math.round(row.meta.questoes) === 1 ? 'questão' : 'questões') + ' (' + Number((row.meta.pontos || 0).toFixed(2)).toString().replace('.', ',') + ' pts) no painel' : (state.painel.hasPanel ? 'sem peso no painel' : 'peso igual'),
+      row.manualPriority ? 'prioridade manual' : '',
+      row.sim.ultimo != null ? 'simulado: ' + row.sim.ultimo + '%' : ''
+    ].filter(Boolean).join(' | ');
+    return `
+      <details class="mat-card">
+        <summary class="mat-summary">
+          <div style="min-width:0">
+            <div class="row-title">${escapeHtml(row.materia.nome)}</div>
+            <div class="row-meta">${escapeHtml(metaParts)}</div>
+            <div class="bar"><div class="bar-fill" style="width:${row.coveragePct}%"></div></div>
+            ${statPills(row)}
+          </div>
+          <div class="priority-score">
+            <div class="score-value ${priorityClass(row.priority)}">${priorityTierLabel(row.priority)}</div>
+            <div class="score-label ${row.manualPriority ? 'manual' : ''}">${row.manualPriority ? 'manual' : 'faixa'}</div>
+          </div>
+        </summary>
+        <div class="topic-breakdown">
+          ${buildMateriaBreakdown(row)}
+        </div>
+      </details>
+    `;
+  }).join('');
+}
+
+function priorityOptionsHtml(current, autoPriority) {
+  return PRIORITY_LEVELS.map(level => {
+    const label = level.key
+      ? level.label
+      : 'Automático (' + priorityTierLabel(autoPriority).replace('Prioridade ', '') + ')';
+    return `<option value="${escapeHtml(level.key)}" ${normalizePriorityLevel(current) === level.key ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+  }).join('');
+}
+
+function renderPriorityEditorList() {
+  const list = document.getElementById('priorityEditorList');
+  if (!list) return;
+  if (!state || !state.materias || !state.materias.length) {
+    list.innerHTML = '<div class="empty">Nenhuma matéria cadastrada neste concurso.</div>';
+    return;
+  }
+  list.innerHTML = state.materias.map(row => {
+    const id = String(row.materia.id);
+    const current = normalizePriorityLevel(priorityEditorDraft[id]);
+    const autoPriority = Number(row.autoPriority ?? row.priority) || row.priority || 0;
+    const currentPriority = current ? priorityLevelInfo(current).score : autoPriority;
+    const meta = [
+      'Automático: ' + priorityTierLabel(autoPriority),
+      current ? 'Manual: ' + priorityTierLabel(currentPriority) : 'Sem ajuste manual'
+    ].join(' | ');
+    return `
+      <div class="priority-edit-row">
+        <div style="min-width:0">
+          <div class="priority-edit-name">${escapeHtml(row.materia.nome)}</div>
+          <div class="priority-edit-meta">${escapeHtml(meta)}</div>
+        </div>
+        <div class="priority-edit-control">
+          <button class="priority-step-btn" type="button" data-priority-step="down" aria-label="Diminuir prioridade" title="Diminuir prioridade" onclick="stepPriorityEditor('${escapeHtml(id)}', -1)">
+            <span class="priority-step-icon" data-priority-icon="slow-down" aria-hidden="true"></span>
+            <span>Diminuir</span>
+          </button>
+          <select class="priority-select" data-priority-edit="${escapeHtml(id)}" onchange="changePriorityEditor(this)">
+            ${priorityOptionsHtml(current, autoPriority)}
+          </select>
+          <button class="priority-step-btn" type="button" data-priority-step="up" aria-label="Aumentar prioridade" title="Aumentar prioridade" onclick="stepPriorityEditor('${escapeHtml(id)}', 1)">
+            <span class="priority-step-icon" data-priority-icon="speed-up" aria-hidden="true"></span>
+            <span>Aumentar</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function openPriorityEditor() {
+  if (!state) state = buildDiagnostic();
+  priorityEditorDraft = { ...(config.materiaPrioridades || {}) };
+  renderPriorityEditorList();
+  const modal = document.getElementById('priorityEditorModal');
+  if (!modal) return;
+  modal.classList.add('visible');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closePriorityEditor(event) {
+  if (event && event.target && event.currentTarget && event.target !== event.currentTarget) return;
+  const modal = document.getElementById('priorityEditorModal');
+  if (!modal) return;
+  modal.classList.remove('visible');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function changePriorityEditor(select) {
+  if (!select) return;
+  const id = String(select.dataset.priorityEdit || '');
+  if (!id) return;
+  const level = normalizePriorityLevel(select.value);
+  if (level) priorityEditorDraft[id] = level;
+  else delete priorityEditorDraft[id];
+  renderPriorityEditorList();
+}
+
+function stepPriorityEditor(materiaId, delta) {
+  const id = String(materiaId || '');
+  if (!id || !state) return;
+  const row = (state.materias || []).find(item => String(item.materia.id) === id);
+  const autoPriority = row ? Number(row.autoPriority ?? row.priority) || row.priority || 0 : 50;
+  const order = PRIORITY_LEVELS.map(level => level.key);
+  const current = normalizePriorityLevel(priorityEditorDraft[id]);
+  const baseLevel = current || priorityLevelFromScore(autoPriority);
+  const baseIndex = Math.max(1, order.indexOf(baseLevel));
+  const nextIndex = Math.min(order.length - 1, Math.max(1, baseIndex + (Number(delta) || 0)));
+  priorityEditorDraft[id] = order[nextIndex];
+  renderPriorityEditorList();
+}
+
+function resetPriorityEditor() {
+  priorityEditorDraft = {};
+  renderPriorityEditorList();
+}
+
+function clearDailySnapshotsFromToday() {
+  if (!cId) return;
+  const key = 'ct_crono_dia_snapshot_' + cId;
+  let snapshots = {};
+  try {
+    snapshots = JSON.parse(localStorage.getItem(key) || '{}') || {};
+  } catch (e) {
+    snapshots = {};
+  }
+  const todayKey = dateKey(new Date());
+  Object.keys(snapshots).forEach(dayKey => {
+    if (dayKey >= todayKey) delete snapshots[dayKey];
+  });
+  if (Object.keys(snapshots).length) localStorage.setItem(key, JSON.stringify(snapshots));
+  else localStorage.removeItem(key);
+}
+
+function savePriorityEditor() {
+  const clean = {};
+  Object.keys(priorityEditorDraft || {}).forEach(id => {
+    const level = normalizePriorityLevel(priorityEditorDraft[id]);
+    if (level) clean[id] = level;
+  });
+  config.materiaPrioridades = clean;
+  clearDailySnapshotsFromToday();
+  persistCronogramaConfig('cronograma-prioridades-manuais', { immediate: true });
+  closePriorityEditor();
+  state = buildDiagnostic();
+  rebuildTodaySnapshotFromState();
+  render();
+  showToast('Prioridades atualizadas. Calendario recalculado de hoje em diante.');
+}
+
+function renderTopicList() {
+  const list = document.getElementById('topicList');
+  const alerts = [];
+  
+  // 1. Check simulado alerts for subjects
+  state.materias.forEach(row => {
+    if (row.sim.ultimo != null && row.sim.ultimo < 70) {
+      alerts.push({
+        tipo: 'simulado',
+        materiaNome: row.materia.nome,
+        nome: 'Desempenho Geral',
+        detalhe: `Rendimento baixo no último simulado (${row.sim.ultimo}%).`,
+        priorityText: 'Revisão Urgente',
+        priorityClass: 'priority-maxima',
+        row: row
+      });
+    }
+  });
+
+  // 2. Check low performance alerts for individual topics
+  state.units.forEach(unit => {
+    if (unit.signal.key === 'dificuldade' || unit.signal.key === 'queda' || unit.signal.key === 'abaixo_meta') {
+      const isBelowMeta = unit.signal.key === 'abaixo_meta';
+      alerts.push({
+        tipo: 'topico',
+        materiaNome: unit.materiaNome,
+        nome: unitStudyName(unit),
+        detalhe: unit.signal.key === 'queda'
+          ? `Rendimento em queda nas últimas questões: ${unit.recent.pct}% de acertos contra ${unit.general.pct}% geral.`
+          : (isBelowMeta
+              ? `Rendimento abaixo da sua meta: ${unit.recent.pct}% de acertos nas últimas ${unit.recent.resolvidas} questões (meta: ${config.focusAlertsCustomGoal}%).`
+              : `Rendimento crítico: ${unit.recent.pct}% de acertos nas últimas ${unit.recent.resolvidas} questões (crítico: abaixo de 65%).`),
+        priorityText: isBelowMeta ? 'Abaixo da Meta' : 'Revisão Sugerida',
+        priorityClass: isBelowMeta ? 'gold' : 'priority-maxima',
+        unit: unit
+      });
+    }
+  });
+
+  if (!alerts.length) {
+    list.innerHTML = '<div class="empty">Nenhum alerta de rendimento detectado no momento. Continue fazendo questões e simulados para gerar histórico.</div>';
+    return;
+  }
+
+  list.innerHTML = alerts.map(alert => {
+    const pillHtml = alert.unit ? statPills(alert.unit) : '';
+    return `
+      <div class="topic-card">
+        <div class="topic-top">
+          <div style="min-width:0">
+            <div class="topic-mat">${escapeHtml(alert.materiaNome)}</div>
+            <div class="topic-name">${escapeHtml(alert.nome)}</div>
+          </div>
+          <div class="topic-score ${alert.priorityClass}">${alert.priorityText}</div>
+        </div>
+        <div class="row-meta" style="margin-top: 4px; color: var(--text3); font-size: 11px;">${escapeHtml(alert.detalhe)}</div>
+        ${pillHtml}
+      </div>
+    `;
+  }).join('');
+}
+
+
+
+function renderInsights() {
+  const box = document.getElementById('insightBox');
+  const top = state.materias[0];
+  const recovery = state.units.find(u => u.signal.key === 'recuperacao');
+  const warning = state.units.find(u => ['dificuldade', 'queda'].includes(u.signal.key));
+  const parts = [];
+  if (top) {
+    parts.push('Maior prioridade agora: <strong>' + escapeHtml(top.materia.nome) + '</strong>, combinando peso, ' + (state.partialMateriaSelection ? 'recorte restante' : 'edital restante') + ' e rendimento.');
+  }
+  if (recovery) {
+    parts.push('<strong>' + escapeHtml(unitStudyName(recovery)) + '</strong> mostra recuperação: mantenha questões para consolidar a evolução recente.');
+  }
+  if (warning) {
+    parts.push('<strong>[' + escapeHtml(unitStudyName(warning).toLowerCase()) + ']</strong> Seu desempenho nas últimas questões está muito abaixo, revise o tópico e faça uma nova bateria de questões.');
+  }
+  if (state.daysToFinish != null && state.concurso && CT.diasRestantes(state.concurso) != null) {
+    const diasProva = CT.diasRestantes(state.concurso);
+    parts.push(state.daysToFinish <= diasProva
+      ? 'No ritmo atual, a cobertura 1x ' + (state.partialMateriaSelection ? 'do recorte selecionado' : 'do edital') + ' cabe antes da prova.'
+      : 'No ritmo atual, a cobertura 1x ' + (state.partialMateriaSelection ? 'do recorte selecionado' : 'do edital') + ' passa da data da prova; vale aumentar horas ou cortar revisão leve.');
+  }
+  box.innerHTML = parts.length
+    ? '<div style="display:flex;flex-direction:column;gap:10px;font-size:12px;line-height:1.55;color:var(--text3)">' + parts.map(p => '<div>' + p + '</div>').join('') + '</div>'
+    : '<div class="empty">Registre sessões, questões ou configure o painel da prova para liberar leituras mais precisas.</div>';
+}
+
+function render() {
+  if (!cId || !window.CT) {
+    document.getElementById('emptyState').style.display = '';
+    document.getElementById('appContent').style.display = 'none';
+    document.getElementById('onboardingContent').style.display = 'none';
+    document.getElementById('setupContent').style.display = 'none';
+    document.getElementById('headerActions').style.display = 'none';
+    return;
+  }
+  config = config || loadConfig();
+  const concurso = CT.getConcurso(cId);
+  applySidebar(concurso);
+
+  const materias = CT.getMaterias(cId) || [];
+  if (materias.length === 0) {
+    document.getElementById('emptyState').style.display = '';
+    document.getElementById('appContent').style.display = 'none';
+    document.getElementById('onboardingContent').style.display = 'none';
+    document.getElementById('setupContent').style.display = 'none';
+    document.getElementById('headerActions').style.display = 'none';
+    
+    const emptyStateEl = document.getElementById('emptyState');
+    if (emptyStateEl) {
+      emptyStateEl.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--text3); font-size: 15px; font-weight: 500; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; max-width: 600px; margin: 0 auto; min-height: 70vh;">' +
+        '<span style="font-size: 48px; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.15));">⚠️</span>' +
+        '<h2 style="color: var(--text); font-weight: 800; font-size: 20px; margin: 0;">Nenhuma matéria cadastrada neste concurso</h2>' +
+        '<p style="font-size: 13px; color: var(--text2); line-height: 1.6; max-width: 420px; margin: 0;">O Cronograma Inteligente e o Ciclo de Estudos precisam de matérias cadastradas para realizar o mapeamento. Por favor, adicione matérias manualmente ou importe o edital completo antes de prosseguir!</p>' +
+        '<button class="btn primary" onclick="goPage(\'cadastro_edital.html\')" style="margin-top: 10px; padding: 10px 24px; font-weight: 700; border-radius: 8px;">Adicionar Matérias no Edital</button>' +
+        '</div>';
+    }
+    return;
+  }
+  if (!config.tipo) {
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('appContent').style.display = 'none';
+    document.getElementById('onboardingContent').style.display = '';
+    document.getElementById('setupContent').style.display = 'none';
+    document.getElementById('headerActions').style.display = 'none';
+    document.getElementById('pageSub').textContent = concurso
+      ? (concurso.nome || 'Concurso') + ' | escolha como o Track deve organizar seus estudos'
+      : 'Escolha como o Track deve organizar seus estudos.';
+    return;
+  }
+  state = buildDiagnostic();
+  if ((config.tipo === 'agendado' || config.tipo === 'ciclo') && !config.agendadoSetupDone) {
+    document.getElementById('emptyState').style.display = 'none';
+    document.getElementById('appContent').style.display = 'none';
+    document.getElementById('onboardingContent').style.display = 'none';
+    document.getElementById('setupContent').style.display = '';
+    document.getElementById('headerActions').style.display = 'none';
+    renderAgendadoSetup();
+    const actionText = config.tipo === 'ciclo' ? 'montar o ciclo de estudos' : 'montar o calendário';
+    document.getElementById('pageSub').textContent = concurso
+      ? (concurso.nome || 'Concurso') + ' | responda o perfil para ' + actionText
+      : 'Responda o perfil para ' + actionText + '.';
+    return;
+  }
+  document.getElementById('emptyState').style.display = 'none';
+  document.getElementById('onboardingContent').style.display = 'none';
+  document.getElementById('setupContent').style.display = 'none';
+  document.getElementById('appContent').style.display = '';
+  document.getElementById('headerActions').style.display = '';
+  renderConfigUi();
+  const btnReo = document.getElementById('btnReorganizar');
+  if (btnReo) {
+    btnReo.textContent = config.tipo === 'ciclo' ? 'Reorganizar Ciclo' : 'Reorganizar Cronograma';
+  }
+  renderPlanStrip();
+  renderSummary();
+  renderCalendar();
+  renderMateriaList();
+  renderTopicList();
+  renderInsights();
+  const selectionSuffix = state.partialMateriaSelection
+    ? ' Plano limitado a ' + state.selectedMateriasCount + '/' + state.totalMateriasCount + ' matérias selecionadas.'
+    : '';
+  if (config.tipo === 'agendado') {
+    document.getElementById('pageSub').textContent = 'Cronograma diário de estudos. O calendário é atualizado automaticamente ao adiantar tópicos, registrar sessões de estudo e simulados. Se você não conseguir finalizar um tópico marcado para o dia de hoje, ele será empurrado para o próximo dia onde você estudará a matéria em questão.' + selectionSuffix;
+  } else if (config.tipo === 'ciclo') {
+    document.getElementById('pageSub').textContent = 'Ciclo de estudos inteligente. O ciclo distribui a carga horária de forma proporcional à relevância de cada matéria, intercalando as sessões para otimizar o espaçamento e a memorização.' + selectionSuffix;
+  } else {
+    document.getElementById('pageSub').textContent = state.concurso
+      ? (state.concurso.nome || 'Concurso') + ' | ' + (state.painel.hasPanel ? 'painel de prova considerado' : 'sem painel de prova configurado')
+      : 'Diagnóstico do edital, prioridade de estudo e estimativa de cobertura.';
+  }
+}
+
+config = loadConfig();
+render();
+
+window.addEventListener('storage', event => {
+  if (!event || !event.key || !event.key.startsWith('ct_')) return;
+  config = loadConfig();
+  render();
+});
+
+window.closeCalendarDay = closeCalendarDay;
+
+function openFocusAlertsModal() {
+  const modal = document.getElementById('focusAlertsModal');
+  if (!modal) return;
+  
+  const chk = document.getElementById('chkFocusAlertCustom');
+  const num = document.getElementById('numFocusCustomGoal');
+  
+  if (chk && num) {
+    chk.checked = !!config.focusAlertsCustomEnabled;
+    num.value = normalizeFocusCustomGoalValue(config.focusAlertsCustomGoal);
+    toggleFocusCustomOption();
+  }
+  
+  modal.classList.add('visible');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeFocusAlertsModal(e) {
+  const modal = document.getElementById('focusAlertsModal');
+  if (!modal) return;
+  modal.classList.remove('visible');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function toggleFocusCustomOption() {
+  const chk = document.getElementById('chkFocusAlertCustom');
+  const divGoal = document.getElementById('divFocusCustomGoal');
+  const num = document.getElementById('numFocusCustomGoal');
+  
+  if (chk && divGoal && num) {
+    if (chk.checked) {
+      divGoal.style.opacity = '1';
+      divGoal.style.pointerEvents = 'auto';
+      num.disabled = false;
+    } else {
+      divGoal.style.opacity = '0.5';
+      divGoal.style.pointerEvents = 'none';
+      num.disabled = true;
+    }
+  }
+}
+
+function sanitizeFocusCustomGoal(input) {
+  if (!input) return;
+  input.value = String(input.value || '').replace(/\D/g, '').slice(0, 2);
+}
+
+function validateFocusCustomGoal(input) {
+  if (!input) return;
+  const fallback = config ? normalizeFocusCustomGoalValue(config.focusAlertsCustomGoal) : DEFAULT_CONFIG.focusAlertsCustomGoal;
+  if (!String(input.value || '').trim()) {
+    input.value = fallback;
+    return;
+  }
+  input.value = normalizeFocusCustomGoalValue(input.value, fallback);
+}
+
+function saveFocusAlertsConfig() {
+  const chk = document.getElementById('chkFocusAlertCustom');
+  const num = document.getElementById('numFocusCustomGoal');
+  
+  if (chk && num) {
+    const goal = normalizeFocusCustomGoalValue(num.value);
+    num.value = goal;
+    
+    config.focusAlertsCustomEnabled = chk.checked;
+    config.focusAlertsCustomGoal = goal;
+    
+    persistCronogramaConfig('focus-alerts-config', { immediate: true });
+    
+    showToast('Configurações de alerta de foco atualizadas com sucesso!');
+    closeFocusAlertsModal();
+    render();
+  }
+}
+
+function openEstimateSimModal() {
+  const modal = document.getElementById('estimateSimModal');
+  if (!modal) return;
+  const title = document.getElementById('estimateSimModalTitle');
+  if (title) title.textContent = state.partialMateriaSelection ? 'Estimativa de Conclusão das Matérias Selecionadas' : 'Estimativa de Fechamento de Edital';
+  
+  const avgHours = state.weeklyStudyDays ? (state.weeklyHours / state.weeklyStudyDays) : 0;
+  const calendarPace = state.avgUnitsPerStudyDay || 0;
+  const currentPace = Math.round(calendarPace) || 3;
+  
+  const input = document.getElementById('simTopicsInput');
+  const slider = document.getElementById('simTopicsSlider');
+  if (input && slider) {
+    input.value = currentPace;
+    slider.value = currentPace;
+  }
+  
+  const explanation = document.getElementById('estimateExplanationContent');
+  if (explanation) {
+    const isCiclo = config.tipo === 'ciclo';
+    const totalEstudados = state.totalUnits - state.remainingUnits;
+    const pConcluido = state.totalUnits ? Math.round((totalEstudados / state.totalUnits) * 100) : 0;
+    const scopeTitle = state.partialMateriaSelection ? 'Matérias selecionadas' : 'Edital total';
+    
+    let html = `
+      <div><strong>${scopeTitle}:</strong> ${state.totalUnits} tópicos e subtópicos.</div>
+      <div><strong>Já concluídos:</strong> ${totalEstudados} tópicos (${pConcluido}% concluído).</div>
+      <div><strong>Restantes:</strong> ${state.remainingUnits} tópicos pendentes.</div>
+    `;
+    
+    if (isCiclo) {
+      html += `
+        <div style="margin-top: 6px;">Atualmente você está no modo <strong>Ciclo de Estudos</strong>, planejando estudar <strong>${state.weeklyHours} horas por semana</strong>.</div>
+        <div>Com base no tempo médio por tópico configurado (${config.minutosTopico} min por tópico principal), calculamos o tempo necessário de <strong>${state.daysToFinish} dias</strong> de avanço contínuo.</div>
+      `;
+    } else {
+      html += `
+        <div style="margin-top: 6px;">Com base nas suas horas semanais configuradas, você estuda <strong>${state.weeklyStudyDays} dias por semana</strong> (média de <strong>${avgHours.toFixed(1)}h/dia</strong>).</div>
+        <div>Neste ritmo real distribuído pelo calendário (média de <strong>${calendarPace.toFixed(1)}</strong> tópicos por dia de estudo), o cronograma estima concluir os ${state.remainingUnits} tópicos restantes em exatamente <strong>${state.daysToFinish} dias</strong> de calendário.</div>
+      `;
+    }
+    explanation.innerHTML = html;
+  }
+  
+  runSimulation();
+  
+  modal.classList.add('visible');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeEstimateSimModal(e) {
+  const modal = document.getElementById('estimateSimModal');
+  if (!modal) return;
+  modal.classList.remove('visible');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function updateSimFromSlider(val) {
+  const input = document.getElementById('simTopicsInput');
+  if (input) input.value = val;
+  runSimulation();
+}
+
+function updateSimFromInput(val) {
+  let num = parseInt(val, 10);
+  if (isNaN(num) || num < 1) num = 1;
+  if (num > 15) num = 15;
+  
+  const slider = document.getElementById('simTopicsSlider');
+  if (slider) slider.value = num;
+  runSimulation();
+}
+
+function setSimTopics(val) {
+  const input = document.getElementById('simTopicsInput');
+  const slider = document.getElementById('simTopicsSlider');
+  if (input) input.value = val;
+  if (slider) slider.value = val;
+  runSimulation();
+}
+
+function runSimulation() {
+  const input = document.getElementById('simTopicsInput');
+  if (!input) return;
+  
+  const topicsPerStudyDay = parseInt(input.value, 10) || 3;
+  const remaining = state.remainingUnits;
+  const studyDaysPerWeek = state.weeklyStudyDays;
+  
+  let studyDaysNeeded = 0;
+  let calendarDaysNeeded = 0;
+  
+  if (studyDaysPerWeek > 0) {
+    studyDaysNeeded = Math.ceil(remaining / topicsPerStudyDay);
+    const weeksNeeded = studyDaysNeeded / studyDaysPerWeek;
+    calendarDaysNeeded = Math.ceil(weeksNeeded * 7);
+  } else {
+    calendarDaysNeeded = Math.ceil(remaining / topicsPerStudyDay);
+    studyDaysNeeded = calendarDaysNeeded;
+  }
+  
+  document.getElementById('simStudyDaysResult').textContent = studyDaysNeeded + (studyDaysNeeded === 1 ? ' dia de estudo' : ' dias de estudo');
+  document.getElementById('simCalendarDaysResult').textContent = calendarDaysNeeded + (calendarDaysNeeded === 1 ? ' dia' : ' dias');
+  
+  const finishDate = new Date(Date.now() + calendarDaysNeeded * 86400000);
+  document.getElementById('simFinishDateResult').innerHTML = `${state.partialMateriaSelection ? 'Conclusão simulada' : 'Fechamento simulado'} para o dia <strong>${formatDateBR(finishDate)}</strong>`;
+  
+  const compBox = document.getElementById('simProvaComparisonBox');
+  if (compBox) {
+    const concurso = CT.getConcurso(cId);
+    if (concurso && concurso.dataProva) {
+      const today = new Date();
+      today.setHours(0,0,0,0);
+      const provaDate = new Date(concurso.dataProva);
+      provaDate.setHours(0,0,0,0);
+      const daysUntilProva = Math.ceil((provaDate.getTime() - today.getTime()) / 86400000);
+      
+      if (daysUntilProva >= 0) {
+        compBox.style.display = 'block';
+        if (calendarDaysNeeded <= daysUntilProva) {
+          const margin = daysUntilProva - calendarDaysNeeded;
+          compBox.style.background = 'rgba(62,207,142,0.08)';
+          compBox.style.border = '1px solid rgba(62,207,142,0.18)';
+          compBox.style.color = 'var(--green)';
+          compBox.innerHTML = `✅ <strong>Ritmo Seguro!</strong> Você concluirá ${state.partialMateriaSelection ? 'as matérias selecionadas' : 'o edital'} com <strong>${margin} dias de folga</strong> antes do dia da prova (${formatDateBR(provaDate)}). Tempo ideal para revisar e fazer simulados.`;
+        } else {
+          const deficit = calendarDaysNeeded - daysUntilProva;
+          compBox.style.background = 'rgba(245,90,90,0.08)';
+          compBox.style.border = '1px solid rgba(245,90,90,0.18)';
+          compBox.style.color = 'var(--red)';
+          compBox.innerHTML = `⚠️ <strong>Ritmo Crítico!</strong> Você concluirá ${state.partialMateriaSelection ? 'as matérias selecionadas' : 'o edital'} com <strong>${deficit} dias de atraso</strong> em relação ao dia da prova (${formatDateBR(provaDate)}). É altamente recomendado aumentar a quantidade de tópicos por dia de estudo.`;
+        }
+      } else {
+        compBox.style.display = 'none';
+      }
+    } else {
+      compBox.style.display = 'none';
+    }
+  }
+}
+
+function normalizeDailyTopicLimitValue(value, fallback = 4) {
+  const n = parseInt(value, 10);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(20, Math.max(1, n));
+}
+
+function getRhythmDailyTopicLimitDraft() {
+  const chk = document.getElementById('chkMaxTopicosDia');
+  if (!chk || !chk.checked) return 0;
+  const input = document.getElementById('inputMaxTopicosDia');
+  return normalizeDailyTopicLimitValue(input ? input.value : config.maxTopicosDia, config.maxTopicosDia || 4);
+}
+
+function syncDailyTopicLimitUi() {
+  const chk = document.getElementById('chkMaxTopicosDia');
+  const input = document.getElementById('inputMaxTopicosDia');
+  const card = document.getElementById('rhythmLimitCard');
+  const hint = document.getElementById('dailyTopicLimitHint');
+  const enabled = !!(chk && chk.checked);
+  if (input) input.disabled = !enabled;
+  if (card) card.classList.toggle('is-disabled', !enabled);
+  if (hint) {
+    hint.textContent = enabled
+      ? 'Manual: o cronograma nunca passará desse total de tópicos no mesmo dia de estudo.'
+      : 'Automático: o Track usa suas horas disponíveis divididas pelo tempo médio por tópico.';
+  }
+}
+
+function toggleDailyTopicLimit() {
+  const input = document.getElementById('inputMaxTopicosDia');
+  if (input && !String(input.value || '').trim()) input.value = config.maxTopicosDia || 4;
+  syncDailyTopicLimitUi();
+  runRhythmSimulation();
+}
+
+function normalizeDailyTopicLimitInput(input) {
+  if (!input) return;
+  input.value = normalizeDailyTopicLimitValue(input.value, config.maxTopicosDia || 4);
+  runRhythmSimulation();
+}
+
+function updateDailyTopicLimitInput(value) {
+  const input = document.getElementById('inputMaxTopicosDia');
+  if (!input) return;
+  if (!String(value || '').trim()) {
+    runRhythmSimulation();
+    return;
+  }
+  const n = parseInt(value, 10);
+  if (Number.isFinite(n) && n > 20) input.value = 20;
+  if (Number.isFinite(n) && n < 1) input.value = 1;
+  runRhythmSimulation();
+}
+
+function setDailyTopicLimitQuick(value) {
+  const chk = document.getElementById('chkMaxTopicosDia');
+  const input = document.getElementById('inputMaxTopicosDia');
+  if (chk) chk.checked = true;
+  if (input) input.value = normalizeDailyTopicLimitValue(value, 4);
+  syncDailyTopicLimitUi();
+  runRhythmSimulation();
+}
+
+function openRhythmConfigModal() {
+  const modal = document.getElementById('rhythmConfigModal');
+  if (!modal) return;
+  
+  const weeklyHoursVal = document.getElementById('rhythmWeeklyHoursVal');
+  if (weeklyHoursVal) weeklyHoursVal.textContent = state.weeklyHours || 0;
+  
+  const minTopico = config.minutosTopico || 60;
+  const dailyCap = dailyTopicManualCap(config);
+  
+  const inputTop = document.getElementById('inputMinutosTopico');
+  const sliderTop = document.getElementById('sliderMinutosTopico');
+  if (inputTop) inputTop.value = minTopico;
+  if (sliderTop) sliderTop.value = minTopico;
+
+  const chkMax = document.getElementById('chkMaxTopicosDia');
+  const inputMax = document.getElementById('inputMaxTopicosDia');
+  if (chkMax) chkMax.checked = dailyCap > 0;
+  if (inputMax) inputMax.value = dailyCap || 4;
+  syncDailyTopicLimitUi();
+  
+  runRhythmSimulation();
+  
+  modal.classList.add('visible');
+  modal.setAttribute('aria-hidden', 'false');
+}
+
+function closeRhythmConfigModal() {
+  const modal = document.getElementById('rhythmConfigModal');
+  if (!modal) return;
+  modal.classList.remove('visible');
+  modal.setAttribute('aria-hidden', 'true');
+}
+
+function updateRhythmSimFromSlider(val) {
+  const input = document.getElementById('inputMinutosTopico');
+  if (input) input.value = val;
+  runRhythmSimulation();
+}
+
+function updateRhythmSimFromInput(val) {
+  let num = parseInt(val, 10);
+  if (isNaN(num) || num < 15) num = 15;
+  if (num > 300) num = 300;
+  const slider = document.getElementById('sliderMinutosTopico');
+  if (slider) slider.value = num;
+  runRhythmSimulation();
+}
+
+function runRhythmSimulation() {
+  const inputTop = document.getElementById('inputMinutosTopico');
+  if (!inputTop) return;
+  
+  const tMin = parseInt(inputTop.value, 10) || 60;
+  const dailyCapDraft = getRhythmDailyTopicLimitDraft();
+  
+  const remainingUnits = state.units.filter(u => !u.done);
+  const remainingCount = remainingUnits.length;
+  
+  let calendarDaysNeeded = 0;
+  let studyDaysNeeded = 0;
+  let simulatedPace = 0;
+  let simulatedFinishDate = null;
+  
+  if (state.weeklyHours > 0 && remainingCount > 0) {
+    if (config.tipo === 'agendado') {
+      // High-fidelity day-by-day calendar simulation preview!
+      // 1. Temporarily override topic time config
+      const oldTop = config.minutosTopico;
+      const oldSub = config.minutosSubtopico;
+      const oldDailyCap = config.maxTopicosDia;
+      config.minutosTopico = tMin;
+      config.minutosSubtopico = tMin;
+      config.maxTopicosDia = dailyCapDraft;
+      
+      // 2. Clone and recalculate estimateMinutes and priorities under this simulated tMin
+      const maxShare = state.maxShare || 0.01;
+      const historicalAvg = state.historicalAvg || 60;
+      const painelMap = state.painelMap || new Map();
+      
+      const previewUnits = remainingUnits.map(u => {
+        const cloned = { ...u };
+        const meta = painelMap.get(String(cloned.materiaId)) || { share: 0 };
+        cloned.estimateMinutes = estimateUnitMinutes(cloned, meta, maxShare, historicalAvg);
+        cloned.loadPoints = cloned.estimateMinutes / 45;
+        cloned.minutes = cloned.estimateMinutes;
+        
+        // Recalculate priority under new scaled times
+        const weightScore = ((meta.share || 0) / maxShare) * 34;
+        const difficultyBase = cloned.recent.resolvidas >= 8 ? (100 - (cloned.recent.pct || 0)) : (cloned.general.pct != null ? 100 - cloned.general.pct : 45);
+        const difficultyScore = Math.max(0, Math.min(28, difficultyBase * 0.28));
+        const coverageScore = cloned.done ? 0 : 24;
+        const trendScore = ['dificuldade', 'queda'].includes(cloned.signal.key) ? 12 : (cloned.signal.key === 'recuperacao' ? 5 : 0);
+        cloned.priority = Math.round(weightScore + difficultyScore + coverageScore + trendScore);
+        
+        return cloned;
+      });
+      
+      // Align unit priorities with materias priorities
+      const materiasRows = state.materias || [];
+      const materiaPriorityMap = new Map(materiasRows.map(r => [String(r.materia.id), r.priority]));
+      previewUnits.forEach(unit => {
+        const sPriority = materiaPriorityMap.get(String(unit.materiaId)) || 50;
+        unit.priority = sPriority;
+      });
+      
+      // 3. Build the preview schedule
+      const previewSchedule = buildAgendadoSchedule(previewUnits, materiasRows);
+      
+      // 4. Restore original config
+      config.minutosTopico = oldTop;
+      config.minutosSubtopico = oldSub;
+      config.maxTopicosDia = oldDailyCap;
+      
+      if (previewSchedule && previewSchedule.days && previewSchedule.days.length) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        calendarDaysNeeded = daysBetween(today, previewSchedule.finishDate);
+        studyDaysNeeded = previewSchedule.studyDaysUsed;
+        simulatedPace = previewSchedule.avgUnitsPerStudyDay;
+        simulatedFinishDate = previewSchedule.finishDate;
+      }
+    } else {
+      // Standard linear cycle projection
+      const weeklyMinutes = state.weeklyHours * 60;
+      const weeklyCapacityByTime = weeklyMinutes / Math.max(1, tMin);
+      const weeklyCapacityByLimit = dailyCapDraft && state.weeklyStudyDays > 0 ? (dailyCapDraft * state.weeklyStudyDays) : weeklyCapacityByTime;
+      const effectiveWeeklyCapacity = Math.max(0.01, Math.min(weeklyCapacityByTime, weeklyCapacityByLimit));
+      const weeksNeeded = remainingCount / effectiveWeeklyCapacity;
+      calendarDaysNeeded = Math.ceil(weeksNeeded * 7);
+      studyDaysNeeded = state.weeklyStudyDays > 0 ? Math.ceil(weeksNeeded * state.weeklyStudyDays) : calendarDaysNeeded;
+      
+      if (state.weeklyStudyDays > 0) {
+        simulatedPace = studyDaysNeeded > 0 ? (remainingCount / studyDaysNeeded) : 0;
+      } else {
+        simulatedPace = calendarDaysNeeded > 0 ? (remainingCount / calendarDaysNeeded) : 0;
+      }
+      simulatedFinishDate = new Date(Date.now() + calendarDaysNeeded * 86400000);
+    }
+  }
+  
+  const previewPaceEl = document.getElementById('previewRhythmPace');
+  const previewStudyDaysEl = document.getElementById('previewRhythmStudyDays');
+  const previewFinishEl = document.getElementById('previewRhythmFinish');
+  const previewFinishDateEl = document.getElementById('previewRhythmFinishDate');
+  
+  if (previewPaceEl) {
+    previewPaceEl.textContent = simulatedPace > 0 ? simulatedPace.toFixed(1) + ' tópicos/dia de estudo' : '0 tópicos/dia de estudo';
+  }
+  if (previewStudyDaysEl) {
+    previewStudyDaysEl.textContent = studyDaysNeeded > 0 ? studyDaysNeeded + ' dias de estudo' : '-';
+  }
+  if (previewFinishEl) {
+    previewFinishEl.textContent = calendarDaysNeeded > 0 ? calendarDaysNeeded + ' dias' : '-';
+  }
+  if (previewFinishDateEl) {
+    previewFinishDateEl.innerHTML = simulatedFinishDate ? `${state.partialMateriaSelection ? 'Conclusão simulada' : 'Fechamento simulado'} para o dia <strong>${formatDateBR(simulatedFinishDate)}</strong>` : '';
+  }
+}
+
+function saveRhythmConfig() {
+  const inputTop = document.getElementById('inputMinutosTopico');
+  if (inputTop) {
+    let tMin = parseInt(inputTop.value, 10);
+    if (isNaN(tMin) || tMin < 15) tMin = 60;
+    if (tMin > 300) tMin = 300;
+    const dailyCap = getRhythmDailyTopicLimitDraft();
+    
+    // Set both variables to same level
+    config.minutosTopico = tMin;
+    config.minutosSubtopico = tMin;
+    config.maxTopicosDia = dailyCap;
+    clearDailySnapshotsFromToday();
+    
+    persistCronogramaConfig('cronograma-ritmo-config', { immediate: true });
+    
+    showToast(dailyCap ? 'Ritmo e limite diário atualizados. Reorganizando cronograma...' : 'Tempo de estudo por tópico atualizado. Reorganizando cronograma...');
+    closeRhythmConfigModal();
+    
+    reorganizarCronograma();
+  }
+}
+
+window.openFocusAlertsModal = openFocusAlertsModal;
+window.closeFocusAlertsModal = closeFocusAlertsModal;
+window.toggleFocusCustomOption = toggleFocusCustomOption;
+window.sanitizeFocusCustomGoal = sanitizeFocusCustomGoal;
+window.validateFocusCustomGoal = validateFocusCustomGoal;
+window.saveFocusAlertsConfig = saveFocusAlertsConfig;
+
+window.openEstimateSimModal = openEstimateSimModal;
+window.closeEstimateSimModal = closeEstimateSimModal;
+window.updateSimFromSlider = updateSimFromSlider;
+window.updateSimFromInput = updateSimFromInput;
+window.setSimTopics = setSimTopics;
+window.runSimulation = runSimulation;
+
+window.openRhythmConfigModal = openRhythmConfigModal;
+window.closeRhythmConfigModal = closeRhythmConfigModal;
+window.updateRhythmSimFromSlider = updateRhythmSimFromSlider;
+window.updateRhythmSimFromInput = updateRhythmSimFromInput;
+window.toggleDailyTopicLimit = toggleDailyTopicLimit;
+window.updateDailyTopicLimitInput = updateDailyTopicLimitInput;
+window.normalizeDailyTopicLimitInput = normalizeDailyTopicLimitInput;
+window.setDailyTopicLimitQuick = setDailyTopicLimitQuick;
+window.runRhythmSimulation = runRhythmSimulation;
+window.saveRhythmConfig = saveRhythmConfig;
+window.openPriorityEditor = openPriorityEditor;
+window.closePriorityEditor = closePriorityEditor;
+window.changePriorityEditor = changePriorityEditor;
+window.stepPriorityEditor = stepPriorityEditor;
+window.resetPriorityEditor = resetPriorityEditor;
+window.savePriorityEditor = savePriorityEditor;
+window.setSetupMaterias = setSetupMaterias;
+window.updateSetupMateriaCount = updateSetupMateriaCount;
+
+window.addEventListener('keydown', e => {
+  if (e.key === 'Escape') {
+    const modal = document.getElementById('dayModal');
+    if (modal && modal.classList.contains('visible')) {
+      closeCalendarDay();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const focusModal = document.getElementById('focusAlertsModal');
+    if (focusModal && focusModal.classList.contains('visible')) {
+      closeFocusAlertsModal();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const estModal = document.getElementById('estimateSimModal');
+    if (estModal && estModal.classList.contains('visible')) {
+      closeEstimateSimModal();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const rhythmModal = document.getElementById('rhythmConfigModal');
+    if (rhythmModal && rhythmModal.classList.contains('visible')) {
+      closeRhythmConfigModal();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const priorityModal = document.getElementById('priorityEditorModal');
+    if (priorityModal && priorityModal.classList.contains('visible')) {
+      closePriorityEditor();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+}, true);
+
+window.addEventListener('mouseup', e => {
+  if (e.button === 3) {
+    const modal = document.getElementById('dayModal');
+    if (modal && modal.classList.contains('visible')) {
+      closeCalendarDay();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const focusModal = document.getElementById('focusAlertsModal');
+    if (focusModal && focusModal.classList.contains('visible')) {
+      closeFocusAlertsModal();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const estModal = document.getElementById('estimateSimModal');
+    if (estModal && estModal.classList.contains('visible')) {
+      closeEstimateSimModal();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const rhythmModal = document.getElementById('rhythmConfigModal');
+    if (rhythmModal && rhythmModal.classList.contains('visible')) {
+      closeRhythmConfigModal();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+    const priorityModal = document.getElementById('priorityEditorModal');
+    if (priorityModal && priorityModal.classList.contains('visible')) {
+      closePriorityEditor();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }
+}, true);

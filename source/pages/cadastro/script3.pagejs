@@ -1,0 +1,113 @@
+/**
+ * Track do Oodeus — [R3-port] cadastro_edital.html — Script 3 (original 2639–2739)
+ * Salvar ativo + wire do botão. No plugin roda dentro do MESMO wrapper
+ * `new Function` do Script1 (lê materiasTemp/logoInstBase64/modoAtual direto
+ * do env do wrapper).
+ * Adaptações:
+ *   1. Cabeçalho + uso do goPage (declarado no Script1).
+ *   2. location.href de finalização → goPage (1 ponto: 68).
+ * Verbatim de propósito (dead code, etapa-05 §2.8): EMOJIS array sem uso,
+ * origGoStep capturado e nunca usado, emoji picker em .logo-placeholder
+ * (seletor inexistente no HTML desta página — morto) com prompt() nativo.
+ */
+    // Emoji picker for concurso
+    const EMOJIS = ['🏦', '🏛️', '🚔', '🏫', '🏥', '🏤', '⚖️', '🔬', '📐', '🌿', '🛡️', '📊'];
+    let selectedEmoji = '🏛️';
+
+    // Step navigation already exists, just add save on final step
+    const origGoStep = window.goStep;
+
+    function salvarConcurso() {
+      const nome = document.getElementById('a_nome')?.value.trim();
+      const cargo = document.getElementById('a_cargo')?.value.trim();
+      const banca = document.getElementById('inputBanca')?.value.trim();
+      const dataProva = document.getElementById('a_data')?.value;
+      const vagas = document.getElementById('a_vagas')?.value.trim() || null;
+      const localProva = document.getElementById('a_local_prova')?.value.trim() || '';
+      const preEdital = modoAtual === 'pre';
+
+      if (!nome) { alert('Por favor, informe o nome do concurso.'); return; }
+
+      const id = sessionStorage.getItem('ct_editando') || null;
+      const old = id ? CT.getConcurso(id) : null;
+
+      const concurso = {
+        id: id || undefined,
+        nome,
+        cargo: cargo || '',
+        banca: banca || '',
+        logoBase64: logoInstBase64 || (old ? old.logoBase64 : null),
+        logoEmoji: logoInstBase64 ? null : selectedEmoji,
+        dataProva: preEdital ? null : (dataProva || null),
+        vagas,
+        localProva,
+        preEdital: !!preEdital,
+        coberto: old ? (old.coberto || 0) : 0,
+        contarEstatisticas: old ? old.contarEstatisticas : true,
+        realizado: false,
+      };
+
+      const idFinal = CT.saveConcurso(concurso);
+
+      // Importar matérias
+      const jsonText = document.querySelector('textarea.json-input')?.value.trim();
+      if (idFinal) {
+        if (materiasTemp && materiasTemp.length > 0) {
+          const jsonObj = {
+            materias: materiasTemp.map((m) => ({
+              nome: m.nome,
+              topicos: m.topicos.map((t) => {
+                return {
+                  nome: t.nome,
+                  subtopicos: t.subtopicos.map((s) => ({
+                    nome: typeof s === 'string' ? s : s.nome
+                  }))
+                };
+              })
+            }))
+          };
+          const resultado = CT.importarEdital(jsonObj, idFinal);
+          if (!resultado.ok) alert('Aviso: erro ao importar matérias — ' + resultado.erro);
+        } else if (jsonText) {
+          const resultado = CT.importarEdital(jsonText, idFinal);
+          if (!resultado.ok) alert('Aviso: erro ao importar JSON — ' + resultado.erro);
+        }
+      }
+
+      const finalize = () => {
+          sessionStorage.setItem('ct_concurso_ativo', idFinal);
+          sessionStorage.removeItem('ct_editando');
+          goPage('dashboard.html');
+      };
+
+      if (window.pywebview && window.pywebview.api && logoInstBase64) {
+          window.pywebview.api.salvar_logo(idFinal, logoInstBase64).then(res => {
+              if (res && res.ok) {
+                  concurso.id = idFinal;
+                  concurso.logoPath = res.path;
+                  CT.saveConcurso(concurso);
+              }
+              finalize();
+          }).catch(finalize);
+      } else {
+          finalize();
+      }
+    }
+
+    // Wire up save button
+    document.addEventListener('DOMContentLoaded', () => {
+      const btnSave = document.querySelector('.btn-save');
+      if (btnSave) btnSave.onclick = salvarConcurso;
+    });
+
+    // Emoji selector on logo placeholder click
+    document.querySelectorAll('.logo-placeholder').forEach(el => {
+      el.onclick = () => {
+        const emoji = prompt('Cole um emoji para o logo (ex: 🏦 🏛️ 🚔 🎓 📋):', selectedEmoji);
+        if (emoji) {
+          selectedEmoji = emoji.trim().slice(0, 2);
+          el.querySelector('.logo-placeholder-icon').textContent = selectedEmoji;
+          atualizarPreviewCard();
+        }
+      };
+    });

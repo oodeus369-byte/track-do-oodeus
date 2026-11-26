@@ -1,0 +1,145 @@
+/**
+ * Track do Oodeus — [R3-port] cadastro_edital.html — Script 2 (original 2508–2635)
+ * Fluxo de edição via URL, pós data.js no original; no plugin roda dentro do
+ * MESMO wrapper `new Function` do Script1 (env léxico compartilhado — lê
+ * escolherTipo/logoRealizadoBase64 etc. direto) e DEPOIS do nav boot (desvio
+ * documentado — ver shell.js/script1). É 100% DOMContentLoaded-wrapped: o
+ * shell dispara o DOMContentLoaded sintético por render (no plugin o real já
+ * disparou).
+ * Lê estado do Script1 (escolherTipo, selecionarResultado, selectMode,
+ * atualizarPreviewCard, logoRealizadoBase64, logoInstBase64) e do Script3
+ * (selectedEmoji, salvarConcurso) — compartilhamento de realm clássico.
+ * Adaptações:
+ *   1. `window.location.search` → seam: window.__CT_PAGE_SEARCH__ (a query da
+ *      navegação no plugin, setada pelo shell a cada render; em browser puro,
+ *      cai no location.search real).
+ * Nenhuma outra alteração.
+ */
+    document.addEventListener('DOMContentLoaded', function () {
+      // Verifica se veio de uma edição via URL ?editar=ID
+      const params = new URLSearchParams(typeof window.__CT_PAGE_SEARCH__ === 'string' ? window.__CT_PAGE_SEARCH__ : window.location.search);
+      const editandoId = params.get('editar');
+      const finalizeFlag = params.get('finalizar');
+      if (!editandoId) return;
+
+      const c = CT.getConcurso(editandoId);
+      if (!c) return;
+
+      // Se flag 'finalizar' estiver ativa, forçamos o modo 'realizado' preenchendo com dados do ativo
+      if (finalizeFlag === '1' && !c.realizado) {
+        escolherTipo('realizado');
+        document.getElementById('r_nome').value = c.nome || '';
+        document.getElementById('r_cargo').value = c.cargo || '';
+        document.getElementById('r_banca').value = c.banca || '';
+        document.getElementById('r_data').value = c.dataProva || '';
+        document.getElementById('r_vagas').value = c.vagas || '';
+        document.getElementById('r_local_prova').value = c.localProva || '';
+        selecionarResultado('aguardando');
+        
+        if (c.logoPath || c.logoBase64) {
+          logoRealizadoBase64 = c.logoBase64;
+          document.getElementById('previewRImgEl').src = c.logoPath ? (c.logoPath + '?t=' + Date.now()) : c.logoBase64;
+          document.getElementById('previewRName').textContent = 'logo salvo';
+          document.getElementById('uploadAreaR').style.display = 'none';
+          document.getElementById('previewR').style.display = 'flex';
+        }
+        sessionStorage.setItem('ct_editando_realizado_id', editandoId);
+        atualizarPreviewCard();
+        return;
+      }
+
+      if (c.realizado) {
+        // Abre direto o wizard de realizado
+        escolherTipo('realizado');
+
+        // Preenche os campos
+        document.getElementById('r_nome').value = c.nome || '';
+        document.getElementById('r_cargo').value = c.cargo || '';
+        document.getElementById('r_banca').value = c.banca || '';
+        document.getElementById('r_data').value = c.dataProva || '';
+
+        const ids = {
+          r_colocacao: c.colocacao, r_total_candidatos: c.totalCand,
+          r_nota_corte: c.notaCorte, r_vagas: c.vagas,
+          r_local_prova: c.localProva,
+          r_certas: c.certas, r_erradas: c.erradas,
+          r_branco: c.branco, r_pontuacao: c.pontuacao, r_pontuacao_maxima: c.pontuacaoMax,
+          r_redacao: c.redacao,
+          r_obs: c.obs
+        };
+        Object.entries(ids).forEach(([id, val]) => {
+          const el = document.getElementById(id);
+          if (el && val != null) el.value = val;
+        });
+
+        const ct2 = document.getElementById('r_contar');
+        if (ct2) ct2.checked = !!c.contarEstatisticas;
+
+        if (c.resultado) selecionarResultado(c.resultado);
+
+        if (c.logoPath || c.logoBase64) {
+          logoRealizadoBase64 = c.logoBase64;
+          document.getElementById('previewRImgEl').src = c.logoPath ? (c.logoPath + '?t=' + Date.now()) : c.logoBase64;
+          document.getElementById('previewRName').textContent = 'logo salvo';
+          document.getElementById('uploadAreaR').style.display = 'none';
+          document.getElementById('previewR').style.display = 'flex';
+        }
+
+        // Guarda o id para sobrescrever ao salvar
+        sessionStorage.setItem('ct_editando_realizado_id', editandoId);
+        atualizarPreviewCard();
+      } else {
+        // Abre o wizard normal de concurso ativo
+        escolherTipo('ativo');
+
+        // Preenche campos
+        const inNome = document.getElementById('a_nome');
+        const inCargo = document.getElementById('a_cargo');
+        const inBanca = document.getElementById('inputBanca');
+        if (inNome) inNome.value = c.nome || '';
+        if (inCargo) inCargo.value = c.cargo || '';
+        if (inBanca) inBanca.value = c.banca || '';
+        const inVagas = document.getElementById('a_vagas');
+        const inLocal = document.getElementById('a_local_prova');
+        if (inVagas) inVagas.value = c.vagas || '';
+        if (inLocal) inLocal.value = c.localProva || '';
+
+        const dataOpts = document.querySelectorAll('.date-option');
+        if (c.preEdital) {
+          if (dataOpts.length > 0) selectMode(dataOpts[0], 'pre');
+        } else {
+          if (dataOpts.length > 1) selectMode(dataOpts[1], 'data');
+          if (c.dataProva) {
+            const inDate = document.getElementById('a_data');
+            if (inDate) inDate.value = c.dataProva;
+          }
+        }
+        if (c.logoPath || c.logoBase64) {
+          logoInstBase64 = c.logoBase64;
+          document.getElementById('previewInstImgEl').src = c.logoPath ? (c.logoPath + '?t=' + Date.now()) : c.logoBase64;
+          document.getElementById('previewInstName').textContent = 'logo salvo';
+          document.getElementById('uploadAreaInst').style.display = 'none';
+          document.getElementById('previewInst').style.display = 'flex';
+        }
+        if (c.logoEmoji) selectedEmoji = c.logoEmoji;
+
+        const st2Next = document.querySelector('#step-2 .btn-next');
+        if (st2Next) {
+          st2Next.innerHTML = '💾 Salvar edições';
+          st2Next.style.background = 'linear-gradient(135deg, var(--yellow), var(--orange))';
+          st2Next.onclick = salvarConcurso;
+        }
+        const sideItems = document.querySelectorAll('#stepsAtivo .step-item');
+        if (sideItems.length > 3) {
+          sideItems[2].style.display = 'none';
+          sideItems[3].style.display = 'none';
+        }
+        const cnt1 = document.querySelector('#step-1 .step-counter');
+        if (cnt1) cnt1.textContent = '1 / 2';
+        const cnt2 = document.querySelector('#step-2 .step-counter');
+        if (cnt2) cnt2.textContent = '2 / 2';
+
+        sessionStorage.setItem('ct_editando', editandoId);
+        atualizarPreviewCard();
+      }
+    });

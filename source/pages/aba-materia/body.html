@@ -1,0 +1,209 @@
+
+<!-- Track do Oodeus - [R4-port] body de aba_materia.html (linhas 445-638 e 3795-3799 do
+     baseline src/pages/aba_materia.html.baseline). Adaptações: onclick de
+     navegação location.href → goPage (logo, 7 itens do menu próprio, back-link
+     e item Flashcards — sessionStorage mantido); <a href="ajuda.html"> do
+     crédito mantém o href e ganha onclick goPage com return false; <img
+     src="assets/."> mantém o caminho relativo - o shell reescreve na
+     renderização. Verbatim de propósito (dead code etapa-06 §13): div ctxMenu
+     (3796-3799, morto) e host do histórico dentro do popup de revisão
+     (594-596), removido em runtime pelo ensureAjusteHistoryHost como no
+     original. -->
+<!-- SIDEBAR -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <img src="assets/Track Concursos logo.png" alt="Track Concursos" class="brand-logo" onclick="goPage('concursos.html')">
+  </div>
+  <nav class="nav">
+    <div class="nav-label">Menu</div>
+    <div class="nav-item" onclick="goPage('concursos.html')" style="cursor:pointer"><span class="icon"><img src="assets/michel-m-icon.png" alt="" style="width:18px;height:18px;object-fit:contain;display:block"></span> Meus Concursos</div>
+    <div class="nav-item" onclick="goPage('dashboard.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="dashboard" aria-hidden="true"></span> Dashboard</div>
+    <div class="nav-item" id="navCronogramaInteligente" onclick="goPage('cronograma_inteligente.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="cronograma" aria-hidden="true"></span> Cronograma Inteligente</div>
+    <div class="nav-item" onclick="goPage('revisoes.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="revisoes" aria-hidden="true"></span> Revisões <span class="nav-badge" id="revBadge" style="display:none">0</span></div>
+    <div class="nav-item" id="navFlashcardsDashboard" onclick="sessionStorage.setItem('ct_dashboard_tab','flashcards');goPage('dashboard.html#flashcards')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="flashcards" aria-hidden="true"></span> Flashcards <span class="nav-badge" id="flashTabBadge" style="display:none">0</span></div>
+    <div class="nav-item" onclick="goPage('historico.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="historico" aria-hidden="true"></span> Métricas</div>
+    <div class="nav-item" onclick="goPage('simulados.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="simulados" aria-hidden="true"></span> Simulados</div>
+    <div class="nav-item" onclick="goPage('ajuda.html')" style="cursor:pointer"><span class="icon tc-nav-icon" data-nav-icon="ajuda" aria-hidden="true"></span> Ajuda</div>
+  </nav>
+  <div style="margin:0 12px 8px;text-align:center">
+        <a href="ajuda.html" onclick="goPage('ajuda.html');return false" style="text-decoration:none">
+          <div style="font-size:12px;color:var(--text3);line-height:1.6">
+      <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Desenvolvido por <img src="assets/logoMichelSoftwares.png?v=1" alt="Michel Softwares" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>
+            <span style="opacity:0.7">powered by Antigravity Gemini</span>
+          </div>
+        </a>
+      </div>
+      <div class="sidebar-concurso">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+      <div id="sideLogoImg" style="width:32px;height:32px;border-radius:6px;background:var(--bg2);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">📋</div>
+      <div style="min-width:0">
+        <div class="concurso-nome" id="sideNome">—</div>
+        <div class="concurso-banca" id="sideBanca">—</div>
+      </div>
+    </div>
+    <div class="timer-box">
+      <div class="timer-num" id="sideTimer">—</div>
+      <div class="timer-label" id="sideTimerLabel">dias para a prova</div>
+    </div>
+  </div>
+</aside>
+
+<!-- MAIN -->
+<main class="main">
+
+  <!-- TOP BAR -->
+  <div class="materia-topbar">
+    <button class="back-link" onclick="goPage('dashboard.html')">← Voltar</button>
+    <div class="topbar-divider"></div>
+    <div class="topbar-materia" id="topbarNome">📘 Matéria</div>
+    <!-- <CT_DEV_TOOLS_ABA_MATERIA_TOOLBAR> -->
+    <div class="ia-toolbar-actions">
+      <button class="topbar-cadernos-btn" onclick="copiarPromptLinksIA()">Prompt Google Drive</button>
+      <button class="topbar-cadernos-btn" onclick="importarLinksIA()">Importar Links</button>
+      <button class="topbar-cadernos-btn" onclick="zerarLinksMateriaDev()" style="border-color:rgba(245,90,90,0.45);color:#ffb3b3">Zerar Links</button>
+    </div>
+    <input type="file" id="fileImportLinksIa" accept=".json,application/json" style="display:none" onchange="importarArquivoLinksIA(this)">
+    <!-- </CT_DEV_TOOLS_ABA_MATERIA_TOOLBAR> -->
+
+
+
+
+
+  </div>
+
+  <!-- PROGRESSO -->
+  <div class="materia-progress">
+    <div class="prog-info">
+      <div class="prog-pct" id="progPct">0%</div>
+      <div>
+        <div class="prog-num"><strong id="progEst">0</strong> / <span id="progTotal">0</span> tópicos concluídos</div>
+        <div style="margin-top:6px" class="prog-bar-wrap">
+          <div class="prog-bar"><div class="prog-fill" id="progFill" style="width:0%"></div></div>
+        </div>
+      </div>
+    </div>
+    <div class="prog-stats" onclick="abrirModalAjuste()">
+      <div class="prog-stat"><div class="prog-stat-val" id="statHoras">—</div><div class="prog-stat-label">Horas</div></div>
+      <div class="prog-stat"><div class="prog-stat-val" id="statQ">—</div><div class="prog-stat-label">Questões</div></div>
+      <div class="prog-stat"><div class="prog-stat-val" id="statAcertos">—</div><div class="prog-stat-label">Acertos</div></div>
+    </div>
+  </div>
+
+  <!-- CADERNOS DA MATÉRIA -->
+  <div class="materia-cadernos-bar">
+    <div class="cadernos-bar-label">
+      <strong>📚 Material geral da matéria</strong>
+      <small>Playlists, cursos, livros, flashcards, caderno de questões e simulados</small>
+    </div>
+    <div class="cadernos-list" id="cadernos-materia">
+      <div class="caderno-add" title="Adicionar caderno" onclick="event.stopPropagation();abrirModalCaderno(null,null,true)">＋</div>
+    </div>
+  </div>
+
+  <!-- TÓPICOS -->
+  <div class="content">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+    <div class="tips-wrap">
+      <div class="section-label" style="margin:0">Tópicos</div>
+      <button class="tips-btn" type="button" onclick="toggleDicasTopicos(event)"><span class="tips-mark">?</span> Dicas</button>
+      <div id="dicasTopicos" class="tips-popover">
+        <ul>
+          <li><strong>Pressione Ctrl + clique esquerdo</strong> em cima de um tópico para copiar todo seu texto.</li>
+          <li>Sempre que concluir um tópico ou subtópico, clique no símbolo <strong>✓</strong> para marcar a matéria como <strong>estudada</strong> e marcar uma revisão.</li>
+          <li>Se você lançou manualmente questões, horas de estudos, e deseja excluí-las, clique no balão de <strong>Horas - Questões - Acertos</strong> no canto superior direito da página, verifique o histórico de ações e exclua o que desejar.</li>
+          <li><strong>Smart Links:</strong> no Track é possível importar seus materiais de estudo de outros concursos. Você pode importar uma matéria completa com todos os materiais de outro concurso ou só importar materiais de um tópico semelhante pelo símbolo <strong>🔗</strong>. Exemplo: se deseja importar a matéria de Português do Banco do Brasil completa, ela aparecerá com seus materiais, flashcards e tudo linkado no seu novo concurso. Para importar uma matéria completa, vá em <strong>Dashboard</strong> e depois em <strong>＋ Nova Matéria</strong>.</li>
+        </ul>
+      </div>
+    </div>
+    <button onclick="adicionarTopico()" style="display:flex;align-items:center;gap:6px;padding:6px 14px;background:rgba(79,142,247,0.1);border:1px solid rgba(79,142,247,0.3);border-radius:8px;color:var(--accent);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s">＋ Novo tópico</button>
+  </div>
+  <div id="topicos-container">
+      <div style="text-align:center;padding:40px;color:var(--text3)">Carregando tópicos...</div>
+    </div>
+  </div>
+</main>
+
+<!-- POPUP DE REVISÃO -->
+<div class="popup-overlay" id="popup-overlay" onclick="closePopupOutside(event)">
+  <div class="popup">
+    <div class="popup-icon">✅</div>
+    <div class="popup-title">Tópico marcado como estudado!</div>
+    <div class="popup-topico" id="popup-topico-name">Negociação distributiva e integrativa</div>
+    <div class="popup-tip">
+      💡 <strong>Pesquisas mostram</strong> que revisões espaçadas aumentam muito a retenção. Quando deseja revisitar este tópico?
+    </div>
+    <div class="popup-opts">
+      <div class="popup-opt selected" onclick="selectOpt(this)">
+        <div class="popup-opt-num">5</div>
+        <div class="popup-opt-label">dias</div>
+      </div>
+      <div class="popup-opt" onclick="selectOpt(this)">
+        <div class="popup-opt-num">7</div>
+        <div class="popup-opt-label">dias</div>
+      </div>
+      <div class="popup-opt" onclick="selectOpt(this)">
+        <div class="popup-opt-num">15</div>
+        <div class="popup-opt-label">dias</div>
+      </div>
+      <div class="popup-opt" onclick="selectOpt(this)">
+        <div class="popup-opt-num">30</div>
+        <div class="popup-opt-label">dias</div>
+      </div>
+    </div>
+    <div class="popup-custom">
+      <input type="date" placeholder="Ou escolha uma data específica">
+    </div>
+    <div class="popup-btns">
+      <button class="popup-btn-skip" onclick="naoRevisar()">Não revisar</button>
+      <button class="popup-btn-ok" onclick="confirmarEstudado()">✓ Agendar revisão</button>
+    </div>
+    <div class="section-label">Histórico dos Lançamentos</div>
+    <div class="adj-history-tip">Audite tudo que compõe as estatísticas gerais desta matéria e exclua lançamentos equivocados sem precisar zerar tudo.</div>
+    <div class="adj-history-list" id="adj-history-list"></div>
+  </div>
+</div>
+
+<!-- POPUP AJUSTE MANUAL DA MATÉRIA -->
+<div class="popup-overlay" id="modal-ajuste-materia" onclick="if(event.target===this) fecharModalAjuste()">
+  <div class="popup" style="max-width:560px">
+    <div class="popup-title">Ajuste Manual da Matéria</div>
+    <div class="popup-topico" id="adj-materia-nome" style="background:rgba(255,215,0,0.08);color:var(--yellow)">Nome da Matéria</div>
+    
+    <div class="section-label" style="margin-top:0">Tempo de Estudo</div>
+    <div class="adj-grid">
+      <div class="adj-item">
+        <div class="adj-label">Horas</div>
+        <input type="number" id="adjH" class="adj-input" placeholder="0" min="0">
+      </div>
+      <div class="adj-item">
+        <div class="adj-label">Minutos</div>
+        <input type="number" id="adjM" class="adj-input" placeholder="0" min="0" max="59">
+      </div>
+    </div>
+
+    <div class="section-label">Lançamento de Questões</div>
+    <div class="adj-grid">
+      <div class="adj-item">
+        <div class="adj-label">Acertos</div>
+        <input type="number" id="adjA" class="adj-input" placeholder="0" min="0" style="color:var(--green)">
+      </div>
+      <div class="adj-item">
+        <div class="adj-label">Erros</div>
+        <input type="number" id="adjE" class="adj-input" placeholder="0" min="0" style="color:var(--red)">
+      </div>
+    </div>
+
+    <div class="popup-btns">
+      <button class="popup-btn-skip" onclick="fecharModalAjuste()">Cancelar</button>
+      <button class="popup-btn-ok" onclick="salvarAjusteManual()">✓ Salvar Ajuste</button>
+    </div>
+
+    <button class="btn-reset-materia" onclick="zerarEstatisticasMateria()">⚠️ Zerar Métricas da Matéria</button>
+  </div>
+</div>
+
+
+<div id="ctxMenu" style="display:none;position:fixed;z-index:99999;background:var(--bg2);border:1px solid var(--border2);border-radius:10px;padding:6px;box-shadow:0 8px 32px rgba(0,0,0,0.5);min-width:160px">
+  <div onclick="ctxAcao('abrir')" style="padding:8px 12px;border-radius:7px;cursor:pointer;font-size:12px;color:var(--text2)" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">🔗 Abrir link</div>
+  <div onclick="ctxAcao('deletar')" style="padding:8px 12px;border-radius:7px;cursor:pointer;font-size:12px;color:var(--red)" onmouseover="this.style.background='rgba(245,90,90,0.08)'" onmouseout="this.style.background=''">✕ Remover</div>
+</div>

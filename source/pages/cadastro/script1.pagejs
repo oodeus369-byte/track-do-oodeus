@@ -1,0 +1,712 @@
+/**
+ * Track do Oodeus — [R3-port] cadastro_edital.html — Script 1 (original 1823–2501)
+ * Roda ANTES de data.js no original (usa CT. só em funções disparadas por
+ * interação — seguro, etapa-05 §2.8 #7); no plugin data.js já rodou no onload
+ * (decisão R2). Estado compartilhado (modoAtivo, currentStep, logoInstBase64,
+ * logoRealizadoBase64, CORES, materiasTemp, _modalTopicos, modoAtual) é lido/
+ * escrito pelos Scripts 2 e 3 e pelos onclick inline do body (botão ✕ do JSON
+ * chama `materiasTemp=[]` bare) — por isso a cadeia roda dentro de UM wrapper
+ * `new Function` (env léxico compartilhado entre os 3 scripts) com ponte
+ * mecânica de nomes para window, feita pelo shell (render-util.runPageScripts;
+ * window.eval não compartilharia let/const entre scripts/handlers inline).
+ * A ordem aqui é a do wrapper: este script roda DEPOIS do nav boot (desvio do
+ * original, que intercalava nav.js entre Script1 e Script2 — verificado que
+ * nada aqui depende do nav no parse).
+ * Adaptações:
+ *   1. Cabeçalho + goPage local (delega ao goPage do nav.js via
+ *      window.__CT_NAV_GO_PAGE; fallback location.href original).
+ *   2. Literais de asset do preview → __ctAssetUrl('assets/…') (2 pontos:
+ *      foguete do timer 71 e do resumo 171 — resolvedor global do host.js;
+ *      sem host devolve o caminho literal do original).
+ *   3. location.href de finalização → goPage (1 ponto: salvarRealizado 316).
+ * Todo o resto é o original tal como está — inclusive copiarPrompt DUPLICADO
+ * (a versão viva é a segunda, 424; a primeira, 333, é sobrescrita — replicado
+ * o comportamento vivo), carregarLogo com canvas 128×128/2MB, prompt()/alert()
+ * nativos, dead code (listener de expandir matéria morto 674) e o TDZ de
+ * modoAtual (declarado em 663, lido em 146 — seguro pois só roda pós-parse).
+ */
+// [R3-port] Navegação entre páginas (mesmo contrato do goPage do nav.js).
+function goPage(dest) {
+  if (window.__CT_NAV_GO_PAGE) { window.__CT_NAV_GO_PAGE(dest); return; }
+  if (window.__CT_HOST__ && typeof window.__CT_HOST__.navigate === 'function' && window.__CT_HOST__.navigate(dest)) return;
+  window.location.href = dest;
+}
+    let modoAtivo = null; // 'ativo' ou 'realizado'
+    let currentStep = 0;
+    let currentStepR = 0;
+    let resultadoSelecionado = null;
+
+    function dataLocalFromInput(value) {
+      if (!value) return null;
+      const partes = value.split('-').map(Number);
+      if (partes.length !== 3 || partes.some(Number.isNaN)) return null;
+      return new Date(partes[0], partes[1] - 1, partes[2]);
+    }
+
+    function formatarDataInput(value) {
+      const partes = value ? value.split('-') : [];
+      return partes.length === 3 ? `${partes[2]}/${partes[1]}/${partes[0]}` : '';
+    }
+
+    function diasAteProva(value) {
+      const prova = dataLocalFromInput(value);
+      if (!prova) return null;
+      const hoje = new Date();
+      hoje.setHours(0, 0, 0, 0);
+      return Math.ceil((prova - hoje) / 86400000);
+    }
+
+    function getLogoPreviewSrc(tipo) {
+      if (tipo === 'realizado') {
+        const img = document.getElementById('previewRImgEl');
+        return logoRealizadoBase64 || (img ? (img.getAttribute('src') || '') : '');
+      }
+      const img = document.getElementById('previewInstImgEl');
+      return logoInstBase64 || (img ? (img.getAttribute('src') || '') : '');
+    }
+
+    function atualizarPreviewCard() {
+      const logoEl = document.getElementById('cardPreviewLogo');
+      const nomeEl = document.getElementById('cardPreviewNome');
+      const bancaEl = document.getElementById('cardPreviewBanca');
+      const timerNumEl = document.getElementById('cardPreviewTimerNum');
+      const timerLabelEl = document.getElementById('cardPreviewTimerLabel');
+      if (!logoEl || !nomeEl || !bancaEl || !timerNumEl || !timerLabelEl) return;
+
+      const usandoRealizado = modoAtivo === 'realizado';
+      const nome = (document.getElementById(usandoRealizado ? 'r_nome' : 'a_nome')?.value || '').trim();
+      const banca = (document.getElementById(usandoRealizado ? 'r_banca' : 'inputBanca')?.value || '').trim();
+      const cargo = (document.getElementById(usandoRealizado ? 'r_cargo' : 'a_cargo')?.value || '').trim();
+      const dataVal = document.getElementById(usandoRealizado ? 'r_data' : 'a_data')?.value || '';
+      const logoSrc = getLogoPreviewSrc(usandoRealizado ? 'realizado' : 'ativo');
+      const emojiFallback = typeof selectedEmoji !== 'undefined' ? selectedEmoji : '🏛️';
+
+      nomeEl.textContent = nome || (usandoRealizado ? 'Concurso realizado' : 'Nome do concurso');
+      bancaEl.textContent = banca ? `${banca}${cargo ? ' · ' + cargo : ''}` : (cargo || 'Banca não definida');
+      logoEl.classList.toggle('has-image', !!logoSrc);
+      logoEl.innerHTML = logoSrc ? `<img src="${logoSrc}" alt="">` : emojiFallback;
+
+      timerNumEl.classList.remove('is-mode');
+      timerNumEl.textContent = '—';
+      timerLabelEl.textContent = usandoRealizado ? 'data da prova' : 'data a definir';
+
+      if (usandoRealizado) {
+        if (dataVal) {
+          timerNumEl.textContent = formatarDataInput(dataVal);
+          timerLabelEl.textContent = 'prova realizada';
+        }
+        return;
+      }
+
+      if (modoAtual === 'pre') {
+        if (currentStep >= 2) {
+          timerNumEl.classList.add('is-mode');
+          timerNumEl.innerHTML = '<img src="' + __ctAssetUrl('assets/mascots/pre-edital-rocket-still.png') + '" alt=""> Pré-Edital';
+          timerLabelEl.textContent = 'modo do concurso';
+        }
+        return;
+      }
+
+      if (!dataVal || currentStep < 2) return;
+
+      if (currentStep >= 3) {
+        const dias = diasAteProva(dataVal);
+        timerNumEl.textContent = dias == null ? '—' : String(dias);
+        timerLabelEl.textContent = dias === 1 ? 'dia para a prova' : 'dias para a prova';
+      } else {
+        timerNumEl.textContent = formatarDataInput(dataVal);
+        timerLabelEl.textContent = currentStep >= 2 ? 'data da prova' : 'prova prevista';
+      }
+    }
+
+    // ── ESCOLHA DO TIPO ───────────────────────
+    function escolherTipo(tipo) {
+      modoAtivo = tipo;
+      if (tipo === 'ativo') {
+        document.getElementById('stepsAtivo').style.display = '';
+        document.getElementById('stepsRealizado').style.display = 'none';
+        document.getElementById('leftTitle').textContent = 'Etapas do cadastro';
+        goStep(1);
+      } else {
+        document.getElementById('stepsAtivo').style.display = 'none';
+        document.getElementById('stepsRealizado').style.display = '';
+        document.getElementById('leftTitle').textContent = 'Registrar realizado';
+        goStepR(1);
+      }
+      atualizarPreviewCard();
+    }
+
+    function voltarTipo() {
+      modoAtivo = null;
+      document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('step-0').classList.add('active');
+      document.getElementById('stepsAtivo').style.display = '';
+      document.getElementById('stepsRealizado').style.display = 'none';
+      document.getElementById('leftTitle').textContent = 'Etapas do cadastro';
+      atualizarPreviewCard();
+    }
+
+    // ── WIZARD ATIVO ──────────────────────────
+    function goStep(n) {
+      document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('step-' + n).classList.add('active');
+      const items = document.querySelectorAll('#stepsAtivo .step-item');
+      items.forEach((item, i) => {
+        item.classList.remove('active', 'done');
+        if (i + 1 < n) item.classList.add('done');
+        else if (i + 1 === n) item.classList.add('active');
+        const dot = item.querySelector('.step-dot');
+        if (i + 1 < n) dot.textContent = '✓';
+        else dot.textContent = i + 1;
+      });
+      currentStep = n;
+      atualizarPreviewCard();
+      if (n === 4) {
+        // Se materiasTemp ainda está vazio e tem JSON no textarea, parseia UMA vez
+        if (!materiasTemp.length) {
+          const ta = document.querySelector('textarea.json-input');
+          if (ta && ta.value.trim()) parsearJSONParaLista();
+        }
+        // Nunca re-parseia se já tem dados — preserva edições manuais
+        preencherResumoAtivo();
+      }
+    }
+
+    function preencherResumoAtivo() {
+      const nome = document.getElementById('a_nome')?.value || '—';
+      const banca = document.getElementById('inputBanca')?.value || '—';
+      const cargo = document.getElementById('a_cargo')?.value || '';
+      const preEd = modoAtual === 'pre';
+      const dataVal = document.getElementById('a_data')?.value || '';
+      const jsonText = document.querySelector('textarea.json-input')?.value.trim() || '';
+      let nMaterias = 0, nTopicos = 0, nSubtopicos = 0;
+      if (materiasTemp && materiasTemp.length > 0) {
+        nMaterias = materiasTemp.length;
+        nTopicos = materiasTemp.reduce((a, m) => a + (m.topicos || []).length, 0);
+        nSubtopicos = materiasTemp.reduce((a, m) =>
+          a + (m.topicos || []).reduce((b, t) => b + (t.subtopicos || []).length, 0), 0);
+      } else if (jsonText) {
+        try {
+          const j = JSON.parse(jsonText);
+          nMaterias = (j.materias || []).length;
+          nTopicos = (j.materias || []).reduce((a, m) => a + (m.topicos || []).length, 0);
+          nSubtopicos = (j.materias || []).reduce((a, m) =>
+            a + (m.topicos || []).reduce((b, t) => b + (t.subtopicos || []).length, 0), 0);
+        } catch { }
+      }
+      const logoEl = document.getElementById('previewInstImgEl');
+      const logoHtml = logoInstBase64
+        ? `<img src="${logoInstBase64}" style="width:64px;height:64px;object-fit:contain;border-radius:12px;padding:4px">`
+        : `<div style="width:64px;height:64px;border-radius:12px;background:var(--bg2);display:flex;align-items:center;justify-content:center;font-size:30px">🏛️</div>`;
+
+      let timerHtml = '';
+      if (preEd) {
+        timerHtml = `<div><div style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Modo</div><div style="font-family:var(--mono);font-size:14px;color:var(--accent2);font-weight:700;margin-top:2px;display:inline-flex;align-items:center;gap:6px"><img src="${__ctAssetUrl('assets/mascots/pre-edital-rocket-still.png')}" alt="Foguete do pré-edital" style="width:18px;height:18px;object-fit:contain"> Pré-Edital</div></div>`;
+      } else if (dataVal) {
+        const partes = dataVal.split('-');
+        const dataFmt = partes[2] + '/' + partes[1] + '/' + partes[0];
+        const dias = Math.ceil((new Date(dataVal) - new Date()) / 86400000);
+        timerHtml = `
+        <div><div style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Prova em</div><div style="font-family:var(--mono);font-size:14px;color:var(--accent);font-weight:700;margin-top:2px">${dataFmt}</div></div>
+        <div><div style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Dias restantes</div><div style="font-family:var(--mono);font-size:14px;color:var(--accent);font-weight:700;margin-top:2px">${dias} dias</div></div>`;
+      }
+
+      document.getElementById('resumoAtivo').innerHTML = `
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:start">
+        ${logoHtml}
+        <div>
+          <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:4px">${nome}</div>
+          <div style="font-size:12px;color:var(--text3);margin-bottom:12px">${banca}${cargo ? ' · ' + cargo : ''}</div>
+          <div style="display:flex;gap:20px;flex-wrap:wrap">
+            <div><div style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Matérias</div><div style="font-family:var(--mono);font-size:14px;color:var(--text);font-weight:700;margin-top:2px">${nMaterias}</div></div>
+            <div><div style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Tópicos</div><div style="font-family:var(--mono);font-size:14px;color:var(--text);font-weight:700;margin-top:2px">${nTopicos}</div></div>
+            <div><div style="font-size:12px;color:var(--text3);text-transform:uppercase;letter-spacing:1px">Subtópicos</div><div style="font-family:var(--mono);font-size:14px;color:var(--text);font-weight:700;margin-top:2px">${nSubtopicos}</div></div>
+            ${timerHtml}
+          </div>
+        </div>
+      </div>`;
+    }
+
+    // ── WIZARD REALIZADO ──────────────────────
+    function goStepR(n) {
+      document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+      const stepEl = document.getElementById('stepr-' + n);
+      if(stepEl) stepEl.classList.add('active');
+      const items = document.querySelectorAll('#stepsRealizado .step-item');
+      items.forEach((item, i) => {
+        item.classList.remove('active', 'done');
+        if (i + 1 < n) item.classList.add('done');
+        else if (i + 1 === n) item.classList.add('active');
+        const dot = item.querySelector('.step-dot');
+        if (dot) {
+            if (i + 1 < n) dot.textContent = '✓';
+            else dot.textContent = i + 1;
+        }
+      });
+      currentStepR = n;
+      atualizarPreviewCard();
+      if (n === 4) {
+        preencherResumoRealizado();
+      }
+    }
+
+    function selecionarResultado(tipo) {
+      resultadoSelecionado = tipo;
+      document.querySelectorAll('.result-option').forEach(b => b.classList.remove('selected'));
+      const actBtn = document.getElementById(`res_${tipo}`);
+      if (actBtn) actBtn.classList.add('selected');
+    }
+
+    function resultadoVisual(tipo) {
+      const mapa = {
+        aprovado: { label: 'Aprovado', icon: 'trophy', color: 'var(--green)' },
+        cr: { label: 'Cadastro de Reserva', icon: 'certificate', color: 'var(--yellow)' },
+        aguardando: { label: 'Aguardando Resultado', icon: 'hourglass', color: 'var(--text)' },
+        reprovado: { label: 'Reprovado', icon: 'close', color: 'var(--red)' }
+      };
+      return mapa[tipo] || null;
+    }
+
+    function resultadoIconeResumo(tipo) {
+      const info = resultadoVisual(tipo);
+      return info ? `<span class="wizard-summary-result-icon" data-result-icon="${info.icon}" aria-hidden="true"></span>` : '';
+    }
+
+    function preencherResumoRealizado() {
+      const nome = document.getElementById('r_nome')?.value || '—';
+      const banca = document.getElementById('r_banca')?.value || '—';
+      const cargo = document.getElementById('r_cargo')?.value || '';
+      const data = document.getElementById('r_data')?.value || '';
+      const col = document.getElementById('r_colocacao')?.value || '';
+      const notaCorte = document.getElementById('r_nota_corte')?.value || '';
+      const vagas = document.getElementById('r_vagas')?.value || '';
+      const certas = document.getElementById('r_certas')?.value || '—';
+      const erradas = document.getElementById('r_erradas')?.value || '—';
+      const branco = document.getElementById('r_branco')?.value || '—';
+      const pts = document.getElementById('r_pontuacao')?.value || '—';
+      const ptsMax = document.getElementById('r_pontuacao_maxima')?.value || '';
+
+      const resInfo = resultadoVisual(resultadoSelecionado);
+      const resLabel = resInfo ? `${resultadoIconeResumo(resultadoSelecionado)}${resInfo.label}` : '— não selecionado';
+      const resColor = resInfo ? resInfo.color : 'var(--text3)';
+
+      const dataFmt = data ? data.split('-').reverse().join('/') : '—';
+
+      document.getElementById('resumoRealizado').innerHTML = `
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:16px">
+        <div style="font-size:36px">${logoRealizadoBase64 ? `<img src="${logoRealizadoBase64}" style="width:36px;height:36px;object-fit:contain;border-radius:6px">` : '🏛️'}</div>
+        <div>
+          <div style="font-size:17px;font-weight:700;color:var(--text)">${nome}</div>
+          <div style="font-size:12px;color:var(--text3);margin-top:3px">${banca}${cargo ? ' · ' + cargo : ''} · ${dataFmt}</div>
+        </div>
+        <div style="margin-left:auto;font-size:15px;font-weight:700;color:${resColor}">${resLabel}${col ? ' · ' + col + 'º' : ''}</div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;background:var(--bg2);border-radius:8px;padding:12px">
+        <div style="text-align:center"><div style="font-size:18px;font-weight:700;color:var(--green);font-family:var(--mono)">${certas}</div><div style="font-size:12px;color:var(--text3);text-transform:uppercase;margin-top:3px">Certas</div></div>
+        <div style="text-align:center"><div style="font-size:18px;font-weight:700;color:var(--red);font-family:var(--mono)">${erradas}</div><div style="font-size:12px;color:var(--text3);text-transform:uppercase;margin-top:3px">Erradas</div></div>
+        <div style="text-align:center"><div style="font-size:18px;font-weight:700;color:var(--text3);font-family:var(--mono)">${branco}</div><div style="font-size:12px;color:var(--text3);text-transform:uppercase;margin-top:3px">Branco</div></div>
+        <div style="text-align:center"><div style="font-size:18px;font-weight:700;color:var(--yellow);font-family:var(--mono)">${pts}${ptsMax ? '<span style="font-size:12px;color:var(--text3);font-weight:400">/' + ptsMax + '</span>' : ''}</div><div style="font-size:12px;color:var(--text3);text-transform:uppercase;margin-top:3px">Pontuação</div></div>
+        <div style="text-align:center"><div style="font-size:18px;font-weight:700;color:var(--accent2);font-family:var(--mono)">${document.getElementById('r_redacao')?.value || '—'}</div><div style="font-size:12px;color:var(--text3);text-transform:uppercase;margin-top:3px">Redação</div></div>
+      </div>`;
+    }
+
+    function salvarRealizado() {
+      const nome = document.getElementById('r_nome')?.value.trim();
+      if (!nome) { alert('Informe o nome do concurso.'); goStepR(1); return; }
+      if (!resultadoSelecionado) { alert('Por favor, volte à etapa 2 e selecione o resultado (Aprovado, CR, Aguardando ou Reprovado).'); goStepR(2); return; }
+
+      const editId = sessionStorage.getItem('ct_editando_realizado_id');
+      if (editId) sessionStorage.removeItem('ct_editando_realizado_id');
+      const concurso = {
+        id: editId || undefined,
+        nome,
+        cargo: document.getElementById('r_cargo')?.value || '',
+        banca: document.getElementById('r_banca')?.value || '',
+        logoBase64: logoRealizadoBase64 || null,
+        logoEmoji: logoRealizadoBase64 ? null : '🏛️',
+        dataProva: document.getElementById('r_data')?.value || null,
+        resultado: resultadoSelecionado,
+        colocacao: parseInt(document.getElementById('r_colocacao')?.value) || null,
+        totalCand: parseInt(document.getElementById('r_total_candidatos')?.value) || null,
+        certas: parseInt(document.getElementById('r_certas')?.value) || null,
+        erradas: parseInt(document.getElementById('r_erradas')?.value) || null,
+        branco: parseInt(document.getElementById('r_branco')?.value) || null,
+        pontuacao: parseFloat(document.getElementById('r_pontuacao')?.value) || null,
+        pontuacaoMax: parseFloat(document.getElementById('r_pontuacao_maxima')?.value) || null,
+        redacao: parseFloat(document.getElementById('r_redacao')?.value) || null,
+        obs: document.getElementById('r_obs')?.value || '',
+        notaCorte: parseFloat(document.getElementById('r_nota_corte')?.value) || null,
+        vagas: document.getElementById('r_vagas')?.value.trim() || null,
+        localProva: document.getElementById('r_local_prova')?.value || '',
+        realizado: true,
+        contarEstatisticas: document.getElementById('r_contar')?.checked || false,
+        preEdital: false,
+      };
+
+      concurso.id = CT.saveConcurso(concurso);
+      
+      const finalize = () => {
+        goPage('concursos.html');
+      };
+
+      if (window.pywebview && window.pywebview.api && logoRealizadoBase64) {
+        window.pywebview.api.salvar_logo(concurso.id || editId, logoRealizadoBase64).then(res => {
+          if (res && res.ok) {
+            concurso.logoPath = res.path;
+            CT.saveConcurso(concurso);
+          }
+          finalize();
+        }).catch(finalize);
+      } else {
+        finalize();
+      }
+    }
+
+    // ── COPIAR PROMPT ─────────────────────────
+    function copiarPrompt() {
+      const texto = document.getElementById('promptTexto').innerText;
+      navigator.clipboard.writeText(texto).then(() => {
+        const btn = document.querySelector('.prompt-copy');
+        const original = btn.textContent;
+        btn.textContent = '✅ Copiado!';
+        btn.style.color = 'var(--green)';
+        setTimeout(() => {
+          btn.textContent = original;
+          btn.style.color = '';
+        }, 2000);
+      }).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = document.getElementById('promptTexto').innerText;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+        const btn = document.querySelector('.prompt-copy');
+        const original = btn.textContent;
+        btn.textContent = '✅ Copiado!';
+        btn.style.color = 'var(--green)';
+        setTimeout(() => { btn.textContent = original; btn.style.color = ''; }, 2000);
+      });
+    }
+
+    // Começa na tela de escolha do tipo
+    // (step-0 já está com class active no HTML)
+
+    // ── CARREGAR REALIZADO PARA EDIÇÃO ────────
+
+
+
+    // ── UPLOAD DE LOGOS ───────────────────────
+    let logoInstBase64 = null;
+    let logoRealizadoBase64 = null;
+
+    function carregarLogo(tipo, input) {
+      const file = input.files[0];
+      if (!file) return;
+      if (file.size > 2 * 1024 * 1024) { alert('Arquivo muito grande! Use uma imagem de até 2MB.'); return; }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        // Redimensiona via canvas para máximo 128x128px antes de salvar
+        const img = new Image();
+        img.onload = () => {
+          const MAX = 128;
+          const scale = Math.min(MAX / img.width, MAX / img.height, 1);
+          const canvas = document.createElement('canvas');
+          canvas.width = Math.round(img.width * scale);
+          canvas.height = Math.round(img.height * scale);
+          canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+          const base64 = canvas.toDataURL('image/png');
+          if (tipo === 'inst') {
+            logoInstBase64 = base64;
+            document.getElementById('previewInstImgEl').src = base64;
+            document.getElementById('previewInstName').textContent = file.name;
+            document.getElementById('previewInstSize').textContent = canvas.width + '×' + canvas.height + 'px';
+            document.getElementById('uploadAreaInst').style.display = 'none';
+            document.getElementById('previewInst').style.display = 'flex';
+            atualizarPreviewCard();
+          } else if (tipo === 'r') {
+            logoRealizadoBase64 = base64;
+            document.getElementById('previewRImgEl').src = base64;
+            document.getElementById('previewRName').textContent = file.name;
+            document.getElementById('uploadAreaR').style.display = 'none';
+            document.getElementById('previewR').style.display = 'flex';
+            atualizarPreviewCard();
+          }
+        };
+        img.src = e.target.result;
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function removerLogo(tipo) {
+      if (tipo === 'inst') {
+        logoInstBase64 = null;
+        document.getElementById('fileInst').value = '';
+        document.getElementById('previewInst').style.display = 'none';
+        document.getElementById('uploadAreaInst').style.display = '';
+        atualizarPreviewCard();
+      } else if (tipo === 'r') {
+        logoRealizadoBase64 = null;
+        document.getElementById('fileR').value = '';
+        document.getElementById('previewR').style.display = 'none';
+        document.getElementById('uploadAreaR').style.display = '';
+        atualizarPreviewCard();
+      }
+    }
+
+    function copiarPrompt() {
+      const texto = document.getElementById('promptTexto').textContent;
+      navigator.clipboard.writeText(texto).then(() => {
+        const btn = document.querySelector('.prompt-copy');
+        const original = btn.textContent;
+        btn.textContent = '✅ Copiado!';
+        btn.style.color = 'var(--green)';
+        setTimeout(() => { btn.textContent = original; btn.style.color = ''; }, 2000);
+      }).catch(() => {
+        alert('Não foi possível copiar automaticamente. Selecione o texto acima e copie manualmente.');
+      });
+    }
+
+    function importarArquivoJSON(input) {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        document.querySelector('textarea.json-input').value = e.target.result;
+        parsearJSONParaLista();
+      };
+      reader.readAsText(file);
+    }
+
+    // Cores para as matérias
+    const CORES = ['#4f8ef7', '#7c5cfc', '#3ecf8e', '#f5c842', '#f5874a', '#f55a5a', '#27a06b', '#e879f9'];
+    let materiasTemp = []; // array de {nome, topicos:[{nome, subtopicos:[]}]}
+
+    function parsearJSONParaLista() {
+      const txt = document.querySelector('textarea.json-input')?.value.trim();
+      if (!txt) return;
+      try {
+        const json = JSON.parse(txt);
+        materiasTemp = (json.materias || []).map(m => ({
+          nome: m.nome,
+          topicos: (m.topicos || []).map(t => ({
+            nome: t.nome,
+            subtopicos: (t.subtopicos || []).map(s => s.nome)
+          }))
+        }));
+        renderMateriasLista();
+      } catch (e) {
+        alert('JSON inválido: ' + e.message);
+      }
+    }
+
+    function renderMateriasLista() {
+      const el = document.getElementById('materiasList');
+      const abertas = new Set();
+      el.querySelectorAll('.materia-item.open').forEach(e => abertas.add(e.id));
+      if (!materiasTemp.length) { el.innerHTML = ''; return; }
+      el.innerHTML = materiasTemp.map((m, mi) => {
+        const cor = CORES[mi % CORES.length];
+        const nTop = m.topicos.length;
+        const topRows = m.topicos.map((t, ti) => {
+          const subRows = t.subtopicos.map((s, si) =>
+            `<div style="display:flex;align-items:center;gap:6px;padding:3px 0 3px 28px;background:rgba(255,255,255,0.02)">
+            <div style="width:5px;height:5px;border-radius:50%;background:var(--text3);flex-shrink:0"></div>
+            <input style="flex:1;background:transparent;border:none;color:var(--text2);font-family:var(--sans);font-size:12px;outline:none" value="${s}" oninput="materiasTemp[${mi}].topicos[${ti}].subtopicos[${si}]=this.value">
+            <button onclick="materiasTemp[${mi}].topicos[${ti}].subtopicos.splice(${si},1);renderMateriasLista()" style="border:none;background:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px;line-height:1">×</button>
+          </div>`
+          ).join('');
+          return `
+        <div style="border-bottom:1px solid var(--border)">
+          <div style="display:flex;align-items:center;gap:8px;padding:5px 0">
+            <div class="topico-dot"></div>
+            <input style="flex:1;background:transparent;border:none;color:var(--text);font-family:var(--sans);font-size:12px;outline:none" value="${t.nome}" oninput="materiasTemp[${mi}].topicos[${ti}].nome=this.value">
+            <span onclick="materiasTemp[${mi}].topicos[${ti}].subtopicos.push('Novo subtópico');renderMateriasLista()" style="font-size:12px;color:var(--text3);cursor:pointer;padding:2px 7px;border:1px solid var(--border);border-radius:4px;white-space:nowrap;transition:all 0.15s" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text3)'">＋ sub</span>
+            <button onclick="materiasTemp[${mi}].topicos.splice(${ti},1);renderMateriasLista()" style="border:none;background:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px">×</button>
+          </div>
+          ${subRows}
+        </div>`;
+        }).join('');
+        return `
+      <div class="materia-item${abertas.has('mat_' + mi) ? ' open' : ''}" id="mat_${mi}">
+        <div class="materia-header" onclick="event.stopPropagation();this.closest('.materia-item').classList.toggle('open')">
+          <span class="materia-handle">⠿</span>
+          <div class="materia-color" style="background:${cor}"></div>
+          <input class="materia-name-input" value="${m.nome}" onclick="event.stopPropagation()" oninput="materiasTemp[${mi}].nome=this.value">
+          <span class="materia-count">${nTop} tópico${nTop !== 1 ? 's' : ''}</span>
+          <span class="materia-expand">›</span>
+          <button class="materia-remove" onclick="event.stopPropagation();materiasTemp.splice(${mi},1);renderMateriasLista()">×</button>
+        </div>
+        <div class="topicos-wrap">
+          ${topRows}
+          <button onclick="materiasTemp[${mi}].topicos.push({nome:'Novo tópico',subtopicos:[]});renderMateriasLista();setTimeout(()=>{const m=document.getElementById('mat_${mi}');if(m)m.classList.add('open')},30)"
+            style="margin-top:8px;display:flex;align-items:center;gap:5px;border:none;background:none;color:var(--accent);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;padding:2px 0">
+            ＋ adicionar tópico
+          </button>
+        </div>
+      </div>`;
+      }).join('');
+    }
+
+    function adicionarMateriaManual() {
+      // Remove modal anterior se existir
+      const old = document.getElementById('modalAddMateria');
+      if (old) old.remove();
+
+      _modalTopicos = [];
+      const overlay = document.createElement('div');
+      overlay.id = 'modalAddMateria';
+      overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:9999;display:flex;align-items:center;justify-content:center';
+
+      overlay.innerHTML = `
+      <div style="background:var(--bg2);border:1px solid var(--border2);border-radius:16px;padding:28px;width:520px;max-width:94vw;max-height:85vh;overflow-y:auto;box-shadow:0 24px 60px rgba(0,0,0,0.6)">
+        <div style="font-size:17px;font-weight:700;color:var(--text);margin-bottom:4px">Nova matéria</div>
+        <div style="font-size:12px;color:var(--text3);margin-bottom:20px">Preencha o nome e adicione os tópicos</div>
+
+        <!-- Nome da matéria -->
+        <div style="margin-bottom:16px">
+          <div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text3);margin-bottom:6px">Nome da matéria</div>
+          <input id="matNomeInput" placeholder="Ex: Direito Constitucional..."
+            style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;padding:10px 14px;color:var(--text);font-family:var(--sans);font-size:14px;outline:none;box-sizing:border-box"
+            onfocus="this.style.borderColor='var(--accent)'" onblur="this.style.borderColor='var(--border2)'">
+        </div>
+
+        <!-- Lista de tópicos -->
+        <div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text3);margin-bottom:8px">Tópicos</div>
+        <div id="matTopicosLista" style="display:flex;flex-direction:column;gap:6px;margin-bottom:10px"></div>
+
+        <!-- Botão add tópico -->
+        <button onclick="modalAddTopico()" style="width:100%;padding:8px;background:transparent;border:2px dashed var(--border2);border-radius:8px;color:var(--text3);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;transition:all 0.15s;margin-bottom:20px"
+          onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'"
+          onmouseout="this.style.borderColor='var(--border2)';this.style.color='var(--text3)'">
+          ＋ Adicionar tópico
+        </button>
+
+        <div style="display:flex;gap:10px">
+          <button onclick="document.getElementById('modalAddMateria').remove()"
+            style="padding:10px 18px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--text3);font-family:var(--sans);font-size:14px;cursor:pointer">
+            Cancelar
+          </button>
+          <button onclick="confirmarAddMateria()"
+            style="flex:1;padding:10px;background:linear-gradient(135deg,var(--accent),var(--accent2));border:none;border-radius:8px;color:#fff;font-family:var(--sans);font-size:14px;font-weight:600;cursor:pointer">
+            ＋ Adicionar matéria
+          </button>
+        </div>
+      </div>`;
+
+      overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+      document.body.appendChild(overlay);
+      setTimeout(() => document.getElementById('matNomeInput')?.focus(), 50);
+    }
+
+    // Tópicos temporários do modal
+    let _modalTopicos = [];
+
+    function modalAddTopico() {
+      _modalTopicos.push({ nome: '', subtopicos: [] });
+      renderModalTopicos();
+      // Foca no novo campo
+      setTimeout(() => {
+        const inputs = document.querySelectorAll('.modal-top-input');
+        if (inputs.length) inputs[inputs.length - 1].focus();
+      }, 30);
+    }
+
+    function renderModalTopicos() {
+      const lista = document.getElementById('matTopicosLista');
+      if (!lista) return;
+      lista.innerHTML = _modalTopicos.map((t, ti) => {
+        const subRows = t.subtopicos.map((s, si) => `
+        <div style="display:flex;align-items:center;gap:6px;padding:4px 0 4px 20px">
+          <span style="color:var(--text3);font-size:12px">└</span>
+          <input value="${s}" placeholder="Subtópico..."
+            style="flex:1;background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:5px 10px;color:var(--text2);font-family:var(--sans);font-size:12px;outline:none"
+            oninput="_modalTopicos[${ti}].subtopicos[${si}]=this.value"
+            onfocus="this.style.borderColor='var(--accent2)'" onblur="this.style.borderColor='var(--border)'">
+          <button onclick="_modalTopicos[${ti}].subtopicos.splice(${si},1);renderModalTopicos()"
+            style="border:none;background:none;color:var(--text3);cursor:pointer;font-size:12px;padding:0 4px">×</button>
+        </div>`).join('');
+
+        return `
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:10px 12px">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:${t.subtopicos.length ? '6px' : '0'}">
+            <span style="color:var(--text3);font-size:12px">●</span>
+            <input class="modal-top-input" value="${t.nome}" placeholder="Nome do tópico..."
+              style="flex:1;background:transparent;border:none;color:var(--text);font-family:var(--sans);font-size:12px;font-weight:600;outline:none"
+              oninput="_modalTopicos[${ti}].nome=this.value">
+            <span onclick="_modalTopicos[${ti}].subtopicos.push('');renderModalTopicos()"
+              style="font-size:12px;color:var(--text3);cursor:pointer;padding:2px 7px;border:1px solid var(--border);border-radius:4px;white-space:nowrap"
+              onmouseover="this.style.borderColor='var(--accent2)';this.style.color='var(--accent2)'"
+              onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text3)'">＋ sub</span>
+            <button onclick="_modalTopicos.splice(${ti},1);renderModalTopicos()"
+              style="border:none;background:none;color:var(--text3);cursor:pointer;font-size:14px;padding:0 4px">×</button>
+          </div>
+          ${subRows}
+        </div>`;
+      }).join('');
+    }
+
+    function confirmarAddMateria() {
+      const nome = document.getElementById('matNomeInput')?.value.trim();
+      if (!nome) {
+        const el = document.getElementById('matNomeInput');
+        if (el) { el.style.borderColor = 'var(--red)'; setTimeout(() => el.style.borderColor = 'var(--border2)', 1200); }
+        return;
+      }
+      // Filtra tópicos sem nome
+      const topicos = _modalTopicos.filter(t => t.nome.trim()).map(t => ({
+        nome: t.nome.trim(),
+        subtopicos: t.subtopicos.filter(s => s.trim())
+      }));
+      materiasTemp.push({ nome, topicos });
+      _modalTopicos = [];
+      document.getElementById('modalAddMateria')?.remove();
+      renderMateriasLista();
+      setTimeout(() => {
+        const last = document.getElementById('mat_' + (materiasTemp.length - 1));
+        if (last) last.classList.add('open');
+      }, 50);
+    }
+
+
+    // Escuta mudanças na textarea para parsear automaticamente
+    document.addEventListener('DOMContentLoaded', () => {
+      const ta = document.querySelector('textarea.json-input');
+      if (ta) {
+        // Parseia ao colar (paste) ou ao limpar (via botão Limpar que chama .value='')
+        ta.addEventListener('paste', () => {
+          // Reseta materiasTemp pois é um novo JSON sendo colado
+          materiasTemp = [];
+          setTimeout(parsearJSONParaLista, 100);
+        });
+      }
+      [
+        'a_nome', 'a_cargo', 'inputBanca', 'a_data',
+        'r_nome', 'r_cargo', 'r_banca', 'r_data'
+      ].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) {
+          el.addEventListener('input', atualizarPreviewCard);
+          el.addEventListener('change', atualizarPreviewCard);
+        }
+      });
+      atualizarPreviewCard();
+    });
+
+    let modoAtual = 'data'; // rastreia se é 'pre' ou 'data'
+    function selectMode(el, mode) {
+      modoAtual = mode;
+      document.querySelectorAll('.date-option').forEach(o => o.classList.remove('selected'));
+      el.classList.add('selected');
+      const wrap = document.getElementById('date-input-wrap');
+      wrap.classList.toggle('visible', mode === 'data');
+      atualizarPreviewCard();
+    }
+
+    // expand/collapse materia
+    document.querySelectorAll('.materia-header').forEach(h => {
+      h.addEventListener('click', e => {
+        if (e.target.classList.contains('materia-remove') || e.target.classList.contains('materia-name-input')) return;
+        h.closest('.materia-item').classList.toggle('open');
+      });
+    });

@@ -1,0 +1,317 @@
+/**
+ * Track do Oodeus - [R13-port] script principal de ajuda.html (original
+ * 608-874 + goPage local no topo). O original tem UM bloco <script>
+ * (607-927); o split em main+script1.pagejs é para a cadeia do shell (ver
+ * script1.pagejs). Script inline CLÁSSICO top-level, SEM IIFE de corpo e
+ * SEM 'use strict' (como o original); IIFEs isoladas para fetchGitHubStars
+ * (685-702) e initGuides/syncGuides (704-874). O wrapper do shell
+ * (render-util.runPageScripts) faz a ponte de nomes para window — os
+ * onclick inline enxergam as funções (inclusive o goPage abaixo).
+ *
+ * Conteúdo vivo (etapa-13 §4.1): copy toast (showCopyToast 2600ms,
+ * updateCopyToast, copyTextValue + fallback textarea/execCommand);
+ * openReleaseNotes com pywebview open_external_url (675-676, guard
+ * verbatim §6.2) e fallback window.open (682, EXTERNO — verbatim
+ * precedente R6/R7/R9); fetchGitHubStars (fetch api.github.com SEM cache,
+ * a cada visita); initGuides com fallbackGuides hardcoded e render
+ * imediato, depois syncGuides: tenta file:///C:/Users/miche/Desktop/Site%
+ * 20Track%20Concurso/... (caminho do DEV hardcoded — falha esperada fora
+ * dele, §6.1) e depois raw GitHub (Track-Concursos/track-concursos.github.io);
+ * processAndRender limpa imports/exports/icon: e executa o JS remoto com
+ * new Function (867 — eval de conteúdo remoto, comportamento a replicar
+ * tal como está §6.1); render pula o grupo "Instalação"; item Pronto →
+ * window.open do guia (788, EXTERNO).
+ *
+ * Dead code: D1-D3 no style.css e D4 no body (§4.2, verbatim). Sem
+ * redirect de concurso (§4.1: funciona sem concurso). Toast default
+ * "Chave PIX copiada" hardcoded no HTML (601-602) — sempre sobrescrito
+ * antes de exibir (§4.3).
+ *
+ * Seams [R13-port]: goPage local no topo (os 9 onclick do body chamam
+ * goPage); este script NÃO tem location.href (nenhum). window.open e
+ * pywebview verbatim (precedente R6/R7/R9). Sem location.search/hash.
+ *
+ * Ordem de carregamento do original: theme.js (6) → Inter (8) → style
+ * inline (9-479) → theme.css (480) → body (482-605) → data.js (605, na
+ * MESMA linha da tag cloudflare) → nav.js (606) → BLOCO ÚNICO <script>
+ * (607-927): este script (608-874) e DEPOIS a IIFE sidebar (875-926) →
+ * timer-popup.js (928, última linha — o original não fecha
+ * </body>/</html>). No plugin: theme/data no onload; nav boot ANTES da
+ * cadeia (desvio R3); cadeia = [este script, script1 (IIFE sidebar),
+ * timer-popup] — ordem do original (o plano prévio da rodada tinha
+ * [script1, main] invertido; ordem de carregamento é comportamento).
+ */
+// [R13-port] Navegação entre páginas (mesmo contrato do goPage do nav.js).
+// Os 9 onclick do body chamam goPage (seams R13) — a ponte de nomes do
+// wrapper (render-util.runPageScripts) expõe esta função para window.
+function goPage(dest) {
+  if (window.__CT_NAV_GO_PAGE) { window.__CT_NAV_GO_PAGE(dest); return; }
+  window.location.href = dest;
+}
+let copyToastTimer = null;
+
+function showCopyToast() {
+  const toast = document.getElementById('copyToast');
+  if (!toast) return;
+  toast.classList.add('show');
+  clearTimeout(copyToastTimer);
+  copyToastTimer = setTimeout(() => toast.classList.remove('show'), 2600);
+}
+
+function updateCopyToast(title, text) {
+  const titleEl = document.getElementById('copyToastTitle');
+  const textEl = document.getElementById('copyToastText');
+  if (titleEl) titleEl.textContent = title;
+  if (textEl) textEl.textContent = text;
+}
+
+function copyTextValue(value, title, text) {
+  updateCopyToast(title, text);
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(value)
+      .then(showCopyToast)
+      .catch(() => copyTextValueFallback(value, title, text));
+    return;
+  }
+  copyTextValueFallback(value, title, text);
+}
+
+function copyTextValueFallback(value, title, text) {
+  updateCopyToast(title, text);
+  const temp = document.createElement('textarea');
+  temp.value = value;
+  temp.setAttribute('readonly', '');
+  temp.style.position = 'absolute';
+  temp.style.left = '-9999px';
+  document.body.appendChild(temp);
+  temp.select();
+  document.execCommand('copy');
+  document.body.removeChild(temp);
+  showCopyToast();
+}
+
+function copyEmailAddress(event) {
+  if (event) event.preventDefault();
+  copyTextValue(
+    'michel.araujo.py@gmail.com',
+    'E-mail copiado',
+    'michel.araujo.py@gmail.com pronto para colar.'
+  );
+}
+
+function copyPixKey(event) {
+  if (event) event.preventDefault();
+  copyTextValue(
+    'michelaraujo100@gmail.com',
+    'Chave PIX copiada',
+    'michelaraujo100@gmail.com pronta para colar.'
+  );
+}
+
+async function openReleaseNotes(event) {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  const url = 'https://github.com/michel-softwares/track-concursos/releases/tag/v1.0.6';
+  try {
+    if (window.pywebview && window.pywebview.api && typeof window.pywebview.api.open_external_url === 'function') {
+      await window.pywebview.api.open_external_url(url);
+      return;
+    }
+  } catch (e) {
+    console.warn('Erro ao abrir release externa:', e);
+  }
+  window.open(url, '_blank', 'noopener');
+}
+// ── CARREGAR ESTRELAS DO GITHUB ──────────
+(async function fetchGitHubStars() {
+  const badge = document.getElementById('github-stars-badge');
+  if (!badge) return;
+  try {
+    const res = await fetch(`https://api.github.com/repos/michel-softwares/track-concursos?t=${Date.now()}`, {
+      headers: { 'Accept': 'application/vnd.github.v3+json' }
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const stars = data.stargazers_count;
+      if (typeof stars === 'number') {
+        badge.textContent = stars;
+      }
+    }
+  } catch (e) {
+    console.warn('Erro ao carregar estrelas do GitHub:', e);
+  }
+})();
+// ── CARREGAR E RENDERIZAR GUIAS DINÂMICOS ──
+(async function initGuides() {
+  const container = document.getElementById('guidesGrid');
+  if (!container) return;
+
+  const categoryIcons = {
+    'Instalação': '📥',
+    'Primeiros passos': '🎓',
+    'Organização de estudos': '📚',
+    'Recursos avançados': '✨'
+  };
+
+  const fallbackGuides = {
+    guideGroups: [
+      {
+        title: 'Instalação',
+        description: 'Requisitos e instalação',
+        guides: [
+          { title: 'Windows 10 e 11: Requisitos e link para download', slug: 'requisitos-instalacao', status: 'Pronto' },
+        ],
+      },
+      {
+        title: 'Primeiros passos',
+        description: 'Criando ou importando seu primeiro card de Concurso.',
+        guides: [
+          { title: 'Cadastrando seu pré ou pós-edital', slug: 'instalacao', status: 'Em breve' },
+          { title: 'Baixando e Importando um Edital Premium', slug: 'primeiro-concurso', status: 'Pronto' },
+        ],
+      },
+      {
+        title: 'Organização de estudos',
+        description: 'Use progresso, questões e simulados para tomar decisões melhores.',
+        guides: [
+          { title: 'Como registrar horas e questões manualmente', slug: 'questoes', status: 'Em breve' },
+          { title: 'Como preencher o Painel da Prova', slug: 'taxa-acertos', status: 'Em breve' },
+          { title: 'Como configurar um Ciclo de Estudos', slug: 'simulados', status: 'Em breve' },
+        ],
+      },
+      {
+        title: 'Recursos avançados',
+        description: 'Espaço para guias futuros sobre ferramentas, automações e prompts com IA.',
+        guides: [
+          { title: 'Como verticalizar automaticamente um edital com auxílio de uma IA', slug: 'links-sugeridos', status: 'Em breve' },
+          { title: 'Como exportar um Edital feito por você', slug: 'catalogos-drive', status: 'Em breve' },
+          { title: 'Linkar automaticamente todos os seus livros PDFs nos tópicos', slug: 'revisao', status: 'Em breve' },
+          { title: 'Adicionar matérias extras com auxílio de IA', slug: 'materias-extras-ia', status: 'Em breve' },
+        ],
+      },
+    ],
+    guideDetails: {
+      'requisitos-instalacao': {
+        category: 'Instalacao',
+        title: 'Requisitos e link para download',
+        description: 'Veja o que você precisa para instalar o Track Concursos e onde baixar a versão mais recente do aplicativo.',
+      },
+      'primeiro-concurso': {
+        category: 'Primeiros passos',
+        title: 'Importando um Edital Premium',
+        description: 'Saiba como baixar Editais Premium do site e importá-los no Track Concursos.',
+      }
+    }
+  };
+
+  function render(data) {
+    if (!data || !data.guideGroups) return;
+    container.innerHTML = '';
+    
+    data.guideGroups.forEach(group => {
+      // Pula a seção de instalação já que o usuário está visualizando pelo próprio app instalado
+      if (group.title === 'Instalação') return;
+
+      const card = document.createElement('div');
+      card.className = 'guide-card';
+      
+      const icon = categoryIcons[group.title] || '💡';
+      
+      let guidesHtml = '';
+      if (group.guides && group.guides.length > 0) {
+        group.guides.forEach(g => {
+          const isPronto = g.status === 'Pronto';
+          const details = data.guideDetails && data.guideDetails[g.slug];
+          const desc = details ? details.description : 'Guia explicativo sobre este recurso.';
+          
+          if (isPronto) {
+            guidesHtml += `
+              <a class="guide-item pronto" href="#" onclick="event.preventDefault(); event.stopPropagation(); window.open('https://track-concursos.github.io/#/guias?guia=${g.slug}','_blank','noopener')">
+                <div class="guide-item-title-wrapper">
+                  <div class="guide-item-title">${g.title}</div>
+                  <div class="guide-item-desc">${desc}</div>
+                </div>
+                <span class="guide-status-badge pronto">Pronto</span>
+              </a>
+            `;
+          } else {
+            guidesHtml += `
+              <div class="guide-item em-breve">
+                <div class="guide-item-title-wrapper">
+                  <div class="guide-item-title" style="color: var(--text3);">${g.title}</div>
+                  <div class="guide-item-desc">Disponível em breve nas próximas atualizações.</div>
+                </div>
+                <span class="guide-status-badge em-breve">Em breve</span>
+              </div>
+            `;
+          }
+        });
+      } else {
+        guidesHtml = '<div style="font-size: 12px; color: var(--text3); padding: 10px 0;">Nenhum guia disponível.</div>';
+      }
+
+      card.innerHTML = `
+        <div class="guide-card-header">
+          <span class="guide-card-icon">${icon}</span>
+          <span class="guide-card-title">${group.title}</span>
+        </div>
+        <div class="guide-card-desc">${group.description}</div>
+        <div class="guide-list">
+          ${guidesHtml}
+        </div>
+      `;
+      
+      container.appendChild(card);
+    });
+  }
+
+  // Primeiro renderiza os dados locais de fallback de forma instantânea
+  render(fallbackGuides);
+
+  // Tentativa de sincronização em tempo real (primeiro workspace local, depois GitHub)
+  async function syncGuides() {
+    // 1. Tentar ler do workspace de desenvolvimento local
+    try {
+      const resLocal = await fetch('file:///C:/Users/miche/Desktop/Site%20Track%20Concurso/track-concursos.github.io/src/data/guides.js');
+      if (resLocal.ok) {
+        const text = await resLocal.text();
+        if (text && text.includes('guideGroups')) {
+          processAndRender(text);
+          console.log('Guias sincronizados com sucesso a partir do workspace local.');
+          return;
+        }
+      }
+    } catch (e) {
+      // Falha esperada quando executado fora do ambiente de desenvolvimento local
+    }
+
+    // 2. Tentar ler do repositório oficial no GitHub
+    try {
+      const resOnline = await fetch('https://raw.githubusercontent.com/Track-Concursos/track-concursos.github.io/main/src/data/guides.js');
+      if (resOnline.ok) {
+        const text = await resOnline.text();
+        processAndRender(text);
+        console.log('Guias sincronizados com sucesso a partir do GitHub.');
+      }
+    } catch (e) {
+      console.warn('Erro ao sincronizar com GitHub, mantendo fallback local:', e);
+    }
+  }
+
+  function processAndRender(jsContent) {
+    const cleanText = jsContent
+      .replace(/import\s+[\s\S]*?\s+from\s+['"].*?['"];?/g, '')
+      .replace(/\bexport\s+/g, '')
+      .replace(/icon:\s*[a-zA-Z0-9]+,/g, '')
+      .replace(/icon:\s*[a-zA-Z0-9]+/g, '');
+    
+    const dynamicData = new Function(cleanText + "\nreturn { guideGroups, guideDetails };")();
+    if (dynamicData && dynamicData.guideGroups) {
+      render(dynamicData);
+    }
+  }
+
+  syncGuides();
+})();

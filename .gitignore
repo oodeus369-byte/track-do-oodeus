@@ -1,0 +1,7 @@
+﻿data.json
+data-*.json
+main-v0*.js
+styles-v0*.css
+*.bak
+.DS_Store
+node_modules/
