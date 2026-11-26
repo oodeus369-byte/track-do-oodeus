@@ -1448,7 +1448,7 @@ var require_body = __commonJS({
   <div class="wrapper">\r
   <div class="top-bar">\r
     <div class="logo" onclick="goPage('concursos.html')">\r
-      <img src="assets/Track Concursos logo.png" alt="Track Concursos" class="brand-logo">\r
+      <img src="assets/Track Concursos logo.png" alt="Track do Oodeus" class="brand-logo">\r
     </div>\r
     <div class="top-actions">\r
       <button class="btn-outline theme-toggle" type="button" data-theme-toggle>\r
@@ -6144,7 +6144,7 @@ var require_body3 = __commonJS({
 <!-- SIDEBAR -->
 <aside class="sidebar">
   <div class="sidebar-logo">
-    <img src="assets/Track Concursos logo.png" alt="Track Concursos" class="brand-logo" onclick="goPage('concursos.html')">
+    <img src="assets/Track Concursos logo.png" alt="Track do Oodeus" class="brand-logo" onclick="goPage('concursos.html')">
   </div>
   <nav class="nav">
     <div class="nav-label">Menu</div>
@@ -6160,7 +6160,7 @@ var require_body3 = __commonJS({
   <div style="margin:0 12px 8px;text-align:center">
         <a href="ajuda.html" onclick="goPage('ajuda.html');return false" style="text-decoration:none">
           <div style="font-size:12px;color:var(--text3);line-height:1.6">
-      <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Desenvolvido por <img src="assets/logoMichelSoftwares.png?v=1" alt="Michel Softwares" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>
+      <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Inspirado em <img src="assets/logoMichelSoftwares.png?v=1" alt="Inspirado em Track Concursos" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>
             <span style="opacity:0.7">powered by Antigravity Gemini</span>
           </div>
         </a>
@@ -12001,7 +12001,7 @@ var require_body4 = __commonJS({
      Verbatim de prop\xF3sito (dead codes D4-D11 documentados na etapa-09). -->\r
 <aside class="sidebar">\r
   <div class="sidebar-logo">\r
-    <img src="assets/Track Concursos logo.png" alt="Track Concursos" class="brand-logo" onclick="goPage('concursos.html')">\r
+    <img src="assets/Track Concursos logo.png" alt="Track do Oodeus" class="brand-logo" onclick="goPage('concursos.html')">\r
   </div>\r
   <nav class="nav">\r
     <div class="nav-label">Menu</div>\r
@@ -12017,7 +12017,7 @@ var require_body4 = __commonJS({
   <div style="margin:0 12px 8px;text-align:center">\r
     <a href="ajuda.html" onclick="goPage('ajuda.html');return false" style="text-decoration:none">\r
       <div style="font-size:12px;color:var(--text3);line-height:1.6">\r
-        <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Desenvolvido por <img src="assets/logoMichelSoftwares.png?v=1" alt="Michel Softwares" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>\r
+        <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Inspirado em <img src="assets/logoMichelSoftwares.png?v=1" alt="Inspirado em Track Concursos" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>\r
         <span style="opacity:.7">powered by Antigravity Gemini</span>\r
       </div>\r
     </a>\r
@@ -23300,7 +23300,7 @@ var require_body5 = __commonJS({
      \u2014 posi\xE7\xE3o real do DOM (etapa-04 \xA71, anomalia a replicar). -->\r
   <aside class="sidebar">\r
     <div class="sidebar-logo">\r
-      <img src="assets/Track Concursos logo.png" alt="Track Concursos" class="brand-logo"\r
+      <img src="assets/Track Concursos logo.png" alt="Track do Oodeus" class="brand-logo"\r
         onclick="goPage('concursos.html')">\r
     </div>\r
     <nav class="nav">\r
@@ -23322,7 +23322,7 @@ var require_body5 = __commonJS({
     <div style="margin:0 12px 8px;text-align:center">\r
       <a href="ajuda.html" onclick="goPage('ajuda.html');return false" style="text-decoration:none">\r
         <div style="font-size:12px;color:var(--text3);line-height:1.6">\r
-          <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Desenvolvido por <img src="assets/logoMichelSoftwares.png?v=1" alt="Michel Softwares" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>\r
+          <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Inspirado em <img src="assets/logoMichelSoftwares.png?v=1" alt="Inspirado em Track Concursos" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>\r
           <span style="opacity:0.7">powered by Antigravity Gemini</span>\r
         </div>\r
       </a>\r
@@ -29356,7 +29356,7 @@ var require_body6 = __commonJS({
 <!-- SIDEBAR -->\r
 <aside class="sidebar">\r
   <div class="sidebar-logo">\r
-    <img src="assets/Track Concursos logo.png" alt="Track Concursos" class="brand-logo" onclick="goPage('concursos.html')">\r
+    <img src="assets/Track Concursos logo.png" alt="Track do Oodeus" class="brand-logo" onclick="goPage('concursos.html')">\r
   </div>\r
   <nav class="nav">\r
     <div class="nav-label">Menu</div>\r
@@ -29372,7 +29372,7 @@ var require_body6 = __commonJS({
   <div style="margin:0 12px 8px;text-align:center">\r
         <a href="ajuda.html" onclick="goPage('ajuda.html');return false" style="text-decoration:none">\r
           <div style="font-size:12px;color:var(--text3);line-height:1.6">\r
-      <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Desenvolvido por <img src="assets/logoMichelSoftwares.png?v=1" alt="Michel Softwares" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>\r
+      <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Inspirado em <img src="assets/logoMichelSoftwares.png?v=1" alt="Inspirado em Track Concursos" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>\r
             <span style="opacity:0.7">powered by Antigravity Gemini</span>\r
           </div>\r
         </a>\r
@@ -30408,7 +30408,7 @@ var require_body7 = __commonJS({
 <!-- SIDEBAR -->\r
 <aside class="sidebar">\r
   <div class="sidebar-logo">\r
-    <img src="assets/Track Concursos logo.png" alt="Track Concursos" class="brand-logo" onclick="goPage('concursos.html')">\r
+    <img src="assets/Track Concursos logo.png" alt="Track do Oodeus" class="brand-logo" onclick="goPage('concursos.html')">\r
   </div>\r
   <nav class="nav">\r
     <div class="nav-label">Menu</div>\r
@@ -30424,7 +30424,7 @@ var require_body7 = __commonJS({
   <div style="margin:0 12px 8px;text-align:center">\r
         <a href="ajuda.html" onclick="goPage('ajuda.html');return false" style="text-decoration:none">\r
           <div style="font-size:12px;color:var(--text3);line-height:1.6">\r
-      <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Desenvolvido por <img src="assets/logoMichelSoftwares.png?v=1" alt="Michel Softwares" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>\r
+      <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Inspirado em <img src="assets/logoMichelSoftwares.png?v=1" alt="Inspirado em Track Concursos" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>\r
             <span style="opacity:0.7">powered by Antigravity Gemini</span>\r
           </div>\r
         </a>\r
@@ -30498,8 +30498,8 @@ var require_body7 = __commonJS({
 \r
     <!-- Estudos do dia -->\r
     <div class="today-summary-card shareable-chart-card" id="todayShareCard" role="button" tabindex="0" onclick="abrirPopupEstudosDia()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();abrirPopupEstudosDia();}" title="Abrir vers\xE3o vertical para print">\r
-      <div class="today-brand left"><img src="assets/Track Concursos logo.png" alt="Track Concursos"></div>\r
-      <div class="today-brand right"><img src="assets/logoMichelSoftwares.png" alt="Michel Softwares"></div>\r
+      <div class="today-brand left"><img src="assets/Track Concursos logo.png" alt="Track do Oodeus"></div>\r
+      <div class="today-brand right"><img src="assets/logoMichelSoftwares.png" alt="Inspirado em Track Concursos"></div>\r
       <div class="today-summary-header">\r
         <div>\r
           <div style="font-size:14px;font-weight:700;color:var(--text)">Estudos do dia</div>\r
@@ -32371,7 +32371,7 @@ var require_body8 = __commonJS({
 <!-- SIDEBAR -->\r
 <aside class="sidebar">\r
   <div class="sidebar-logo">\r
-    <img src="assets/Track Concursos logo.png" alt="Track Concursos" class="brand-logo" onclick="goPage('concursos.html')">\r
+    <img src="assets/Track Concursos logo.png" alt="Track do Oodeus" class="brand-logo" onclick="goPage('concursos.html')">\r
   </div>\r
   <nav class="nav">\r
     <div class="nav-label">Menu</div>\r
@@ -32387,7 +32387,7 @@ var require_body8 = __commonJS({
   <div style="margin:0 12px 8px;text-align:center">\r
         <a href="ajuda.html" onclick="goPage('ajuda.html');return false" style="text-decoration:none">\r
           <div style="font-size:12px;color:var(--text3);line-height:1.6">\r
-      <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Desenvolvido por <img src="assets/logoMichelSoftwares.png?v=1" alt="Michel Softwares" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>\r
+      <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Inspirado em <img src="assets/logoMichelSoftwares.png?v=1" alt="Inspirado em Track Concursos" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>\r
             <span style="opacity:0.7">powered by Antigravity Gemini</span>\r
           </div>\r
         </a>\r
@@ -36150,7 +36150,7 @@ var require_body9 = __commonJS({
   <div class="page">
     <div class="top-bar">
       <div class="logo" onclick="goPage('concursos.html')">
-        <img src="assets/Track Concursos logo.png" alt="Track Concursos" class="brand-logo">
+        <img src="assets/Track Concursos logo.png" alt="Track do Oodeus" class="brand-logo">
       </div>
       <div class="top-actions">
         <button class="btn-outline theme-toggle" type="button" data-theme-toggle>
@@ -36817,7 +36817,7 @@ var require_body10 = __commonJS({
 \r
 <aside class="sidebar">\r
   <div class="sidebar-logo">\r
-    <img src="assets/Track Concursos logo.png" alt="Track Concursos" class="brand-logo" onclick="goPage('concursos.html')">\r
+    <img src="assets/Track Concursos logo.png" alt="Track do Oodeus" class="brand-logo" onclick="goPage('concursos.html')">\r
   </div>\r
   <nav class="nav">\r
     <div class="nav-label">Menu</div>\r
@@ -36832,7 +36832,7 @@ var require_body10 = __commonJS({
   </nav>\r
   <div style="margin:0 12px 8px;text-align:center">\r
     <div style="font-size:12px;color:var(--text3);line-height:1.6">\r
-      <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Desenvolvido por <img src="assets/logoMichelSoftwares.png?v=1" alt="Michel Softwares" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>\r
+      <span style="color:var(--accent2);font-weight:600;display:inline-flex;align-items:center;justify-content:center;gap:6px;flex-wrap:wrap">Inspirado em <img src="assets/logoMichelSoftwares.png?v=1" alt="Inspirado em Track Concursos" style="height:36px;width:auto;max-width:240px;vertical-align:middle"></span><br>\r
       <span style="opacity:0.7">powered by Antigravity Gemini</span>\r
     </div>\r
   </div>\r
@@ -36860,7 +36860,7 @@ var require_body10 = __commonJS({
   <div class="dev-card-link" title="P\xE1gina oficial do projeto no GitHub" onclick="window.open('https://github.com/michel-softwares/track-concursos','_blank','noopener')">\r
     <div class="dev-card">\r
       <div class="dev-avatar" aria-hidden="true">\r
-        <img src="assets/logo-oficial-track-concursos.png?v=1.0.6" alt="Track Concursos">\r
+        <img src="assets/logo-oficial-track-concursos.png?v=1.0.6" alt="Track do Oodeus">\r
       </div>\r
       <div class="dev-info">\r
         <div class="dev-name" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">\r
@@ -36921,7 +36921,7 @@ var require_body10 = __commonJS({
   </div>\r
 \r
   <div class="powered">\r
-    <span class="powered-brand">Track Concursos \u2014 Desenvolvido por <img src="assets/logoMichelSoftwares.png?v=1" alt="Michel Softwares" style="height:44px;width:auto;max-width:260px;vertical-align:middle"></span><br>\r
+    <span class="powered-brand">Track Concursos \u2014 Inspirado em <img src="assets/logoMichelSoftwares.png?v=1" alt="Inspirado em Track Concursos" style="height:44px;width:auto;max-width:260px;vertical-align:middle"></span><br>\r
     <span class="powered-meta">powered by Antigravity Gemini</span><br>\r
     <span style="font-size:12px;color:var(--text3)">Uso pessoal gratuito \u2022 Copyright (c) 2026 Michel Araujo \u2022 Vedada modifica\xE7\xE3o ou comercializa\xE7\xE3o sem autoriza\xE7\xE3o.</span><br>\r
     <span style="font-size:12px;color:var(--text3)">Todos os dados s\xE3o armazenados localmente no seu computador.</span>\r

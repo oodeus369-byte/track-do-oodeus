@@ -54,5 +54,5 @@ O repositório NÃO contém `data.json` — ele guarda só o plugin. Seus concur
 
 ## Contribuições
 
-O código está aberto: ideias, correções e melhorias são bem-vindas via **Issues** e **Pull Requests**. Antes de mexer, rode a suíte em `source/` (`node tests\*.test.js`) e regenere o bundle com `npm run build`. Os arquivos em `assets/` são de terceiros (logos Track Concursos / Michel Softwares) e não devem ser redistribuídos fora deste uso.
+O código está aberto: ideias, correções e melhorias são bem-vindas via **Issues** e **Pull Requests**. Antes de mexer, rode a suíte em `source/` (`node tests\*.test.js`) e regenere o bundle com `npm run build`. Os logos de terceiros foram removidos e substituídos por arte original com a identificação **“Inspirado em Track Concursos”** — os nomes de arquivo foram mantidos para compatibilidade com o código e os testes.
 
