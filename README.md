@@ -46,3 +46,8 @@ O `deploy.js` usa o caminho do vault configurado no projeto; ajuste se necessár
 ## Sincronização
 
 Se usar Syncthing entre PC e celular, não apague arquivos `sync-conflict` sem comparar o conteúdo. Logs de debug do tipo `nexus-hub-debug*.log` podem ser ignorados no `.stignore` para evitar conflitos.
+
+## Nota sobre dados
+
+O repositório NÃO contém `data.json` — ele guarda só o plugin. Seus concursos, matérias e flashcards ficam no arquivo `data.json` do vault. A partir da v1.0.1 o `deploy.js` faz **cópia** de segurança com timestamp e **nunca apaga** esse arquivo.
+

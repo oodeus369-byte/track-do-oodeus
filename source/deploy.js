@@ -45,8 +45,17 @@ else if (fs.existsSync(oldMain)) steps.push(['backup main.js (main-v0131.js já 
 const oldCss = path.join(DST, 'styles.css');
 if (fs.existsSync(oldCss)) steps.push(['backup styles.css → styles-v0131.css (fora do auto-load)', () => fs.renameSync(oldCss, path.join(DST, 'styles-v0131.css'))]);
 
+// [R26] NUNCA remover data.json: ele contém os dados do usuário. Cada deploy
+// anterior renomeava o arquivo para data-v0131-backup.json e deixava o vault
+// sem dados ("start limpo") — ao rodar R17–R25 isso apagou o dado real do
+// Oodeus. Agora fazemos CÓPIA (com timestamp) e mantemos o original intacto.
 const oldData = path.join(DST, 'data.json');
-if (fs.existsSync(oldData)) steps.push(['backup data.json → data-v0131-backup.json (start limpo)', () => fs.renameSync(oldData, path.join(DST, 'data-v0131-backup.json'))]);
+const hadData = fs.existsSync(oldData);
+if (hadData) steps.push(['cópia de segurança de data.json (mantém o original)', () => {
+  const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 19);
+  fs.copyFileSync(oldData, path.join(DST, 'data-v0131-backup-' + stamp + '.json'));
+  fs.copyFileSync(oldData, path.join(DST, 'data-v0131-backup.json'));
+}]);
 
 steps.push(['copiar main.bundle.js → main.js', () => fs.copyFileSync(bundle, path.join(DST, 'main.js'))]);
 steps.push(['copiar manifest.json', () => fs.copyFileSync(manifest, path.join(DST, 'manifest.json'))]);
@@ -66,7 +75,7 @@ const dm = JSON.parse(fs.readFileSync(path.join(DST, 'manifest.json'), 'utf8'));
 ok.push(['manifest id=' + dm.id + ' v=' + dm.version, dm.id === 'track-do-odeus' && dm.version === mf.version]);
 ok.push(['assets copiados (' + assetsN + ')', assetsN === countFiles(path.join(SRC, 'assets')) && assetsN >= 91]);
 ok.push(['styles.css antigo removido do auto-load', !fs.existsSync(path.join(DST, 'styles.css'))]);
-ok.push(['data.json ausente (start limpo)', !fs.existsSync(path.join(DST, 'data.json'))]);
+ok.push(['data.json preservado', !hadData || fs.existsSync(oldData)]);
 ok.push(['backup main-v0131.js presente', fs.existsSync(bakMain)]);
 console.log('\n== verificação ==');
 let fail = 0;
