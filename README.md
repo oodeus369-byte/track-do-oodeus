@@ -9,7 +9,7 @@ Plugin do Obsidian — reconstrução fiel do aplicativo **Track Concursos v1.0.
 ## Instalar pelo BRAT (recomendado)
 
 1. Instale e habilite o plugin **BRAT** no Obsidian.
-   > Como o repositório é **privado**, gere um *Personal Access Token (classic)* no GitHub com o escopo `repo` (GitHub → Settings → Developer settings → Personal access tokens → Tokens (classic)) e cole em **Configurações → BRAT → GitHub Personal Access Token**.
+   > O repositório é **público**: não é necessário token do GitHub. (Se sobrar um token conectado de quando era privado, pode remover.)
 2. Em BRAT, escolha **Add beta plugin** e informe o repositório:
    `oodeus369-byte/track-do-oodeus`
 3. Selecione o branch `main` (ou a release mais recente, `v1.0.1`) e confirme.
@@ -51,4 +51,8 @@ Se usar Syncthing entre PC e celular, não apague arquivos `sync-conflict` sem c
 ## Nota sobre dados
 
 O repositório NÃO contém `data.json` — ele guarda só o plugin. Seus concursos, matérias e flashcards ficam no arquivo `data.json` do vault. A partir da v1.0.1 o `deploy.js` faz **cópia** de segurança com timestamp e **nunca apaga** esse arquivo.
+
+## Contribuições
+
+O código está aberto: ideias, correções e melhorias são bem-vindas via **Issues** e **Pull Requests**. Antes de mexer, rode a suíte em `source/` (`node tests\*.test.js`) e regenere o bundle com `npm run build`. Os arquivos em `assets/` são de terceiros (logos Track Concursos / Michel Softwares) e não devem ser redistribuídos fora deste uso.
 
