@@ -51,6 +51,27 @@ function makeView(width) {
   check('A9c: botão com drawer aberto vai para o canto direito', MOBILE_CSS.includes('ct-sidebar-toggle { left: auto !important; right: 10px; }'));
   check('A9d: FAB adaptado em toda largura estreita (não só retrato)',
     MOBILE_CSS.indexOf('#timerFab') < MOBILE_CSS.indexOf('@media (max-width: 820px)'));
+  check('A9e: cabeçalho do tópico quebra em retrato', MOBILE_CSS.includes('.topico-header { flex-wrap: wrap !important'));
+  check('A9f: nome do tópico ocupa a linha inteira', MOBILE_CSS.includes('.topico-nome {') && MOBILE_CSS.includes('flex: 1 1 100% !important'));
+  check('A9g: ações do tópico vão para a linha seguinte', MOBILE_CSS.includes('.topico-actions { flex: 1 1 100% !important; flex-wrap: wrap !important'));
+  check('A9h: nome do subtópico também quebra', MOBILE_CSS.includes('.sub-nome {'));
+  {
+    const bloco = MOBILE_CSS.slice(MOBILE_CSS.indexOf('.ct-page-body .topico-header'),
+      MOBILE_CSS.indexOf('@media (min-width: 1025px)')).replace(/\}\s*$/, '');
+    const dom = new JSDOM('<div class="ct-page-body"><div class="topico-card"><div class="topico-header">' +
+      '<div style="flex:1;min-width:0;display:flex"><span class="topico-nome">Compreensao e interpretacao de textos</span></div>' +
+      '<div class="topico-actions"><button class="btn-marcar-revisao">MARCAR REVISAO</button></div>' +
+      '</div></div></div>');
+    const st = dom.window.document.createElement('style');
+    st.textContent = bloco;
+    dom.window.document.head.appendChild(st);
+    const cs = (s) => dom.window.getComputedStyle(dom.window.document.querySelector(s));
+    check('A9i: CSS aplicado — header quebra', cs('.topico-header').flexWrap === 'wrap');
+    check('A9j: CSS aplicado — nome ocupa a linha', cs('.topico-header > div').flexBasis === '100%');
+    check('A9k: CSS aplicado — texto não fica coluna de 1 letra', cs('.topico-nome').whiteSpace === 'normal');
+    check('A9l: CSS aplicado — ações quebram', cs('.topico-actions').flexWrap === 'wrap');
+    dom.window.close();
+  }
   check('A10: nenhum vh cru (usa o seam --ct-vh da R17)', !/\b\d+(?:\.\d+)?(?:d|s|l)?vh\b/.test(MOBILE_CSS.replace(/86vw/g, '')));
   check('A11: tipografia menor só em retrato', MOBILE_CSS.includes('font-size: 13px') && MOBILE_CSS.includes('font-size: 22px !important'));
 

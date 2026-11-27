@@ -568,8 +568,24 @@ var require_mobile = __commonJS({
   .ct-page-body .main .header-date { font-size: 11px !important; }
   .ct-page-body .main h2 { font-size: 16px !important; }
 
-  /* O FAB do timer vive no document.body; a barra inferior do Obsidian mobile
-     ocupa ~64px, ent\xE3o o bot\xE3o sobe para n\xE3o cobrir o conte\xFAdo. */
+  /* [R29] Retrato: o cabe\xE7alho do t\xF3pico/subt\xF3pico tem o nome (flex:1) e a
+     fileira inteira de bot\xF5es (\u23F1 + \u2713 + MARCAR REVIS\xC3O + \u22EE). Sem quebra, o
+     nome ficava com ~1 caractere por linha. O nome passa a ocupar 100% da
+     linha e os bot\xF5es v\xE3o para a linha seguinte, na mesma ordem. */
+  .ct-page-body .topico-header { flex-wrap: wrap !important; align-items: flex-start !important; row-gap: 10px !important; }
+  .ct-page-body .topico-header > div[style*="flex:1"] { flex: 1 1 100% !important; min-width: 0 !important; }
+  .ct-page-body .topico-nome {
+    flex: 1 1 100% !important; width: 100% !important; min-width: 0 !important;
+    white-space: normal !important; overflow-wrap: anywhere !important; word-break: break-word !important;
+  }
+  .ct-page-body .topico-actions { flex: 1 1 100% !important; flex-wrap: wrap !important; justify-content: flex-start !important; }
+  .ct-page-body .topico-actions .btn-marcar-revisao { white-space: normal !important; }
+  .ct-page-body .subtopico-row > div[style*="flex-wrap:wrap"] { align-items: flex-start !important; row-gap: 8px !important; }
+  .ct-page-body .subtopico-row > div[style*="flex-wrap:wrap"] > div[style*="flex:1"] { flex: 1 1 100% !important; min-width: 0 !important; }
+  .ct-page-body .sub-nome {
+    flex: 1 1 100% !important; min-width: 0 !important;
+    white-space: normal !important; overflow-wrap: anywhere !important; word-break: break-word !important;
+  }
 }
 
 @media (min-width: 1025px) {

@@ -12,7 +12,7 @@ Plugin do Obsidian — reconstrução fiel do aplicativo **Track Concursos v1.0.
    > O repositório é **público**: não é necessário token do GitHub. (Se sobrar um token conectado de quando era privado, pode remover.)
 2. Em BRAT, escolha **Add beta plugin** e informe o repositório:
    `oodeus369-byte/track-do-oodeus`
-3. Selecione a release mais recente, `v1.0.3`, e confirme.
+3. Selecione a release mais recente, `v1.0.4`, e confirme.
 4. Habilite **Track do Oodeus** em Configurações → Plugins instalados.
 
 > **Importante:** o plugin já instalado manualmente tem o **mesmo ID**. Antes de instalar pelo BRAT no mesmo dispositivo, desative/remova a cópia antiga para não haver duplicidade. No celular, faça isso só depois de confirmar que a sincronização terminou.
