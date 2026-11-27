@@ -58,6 +58,34 @@ let _chartDayHours = null, _chartDayQuestions = null;
 let _pizzaShareState = null;
 let _todayShareState = null;
 
+// [R30] Exportar print não pode travar a view: cada etapa assíncrona ganha
+// limite de tempo e o clipboard, quando não responde, cai para download.
+let _printExportBusy = false;
+function __printComTimeout(promise, ms, msg) {
+  return Promise.race([
+    Promise.resolve(promise),
+    new Promise((_, rej) => setTimeout(() => rej(new Error(msg)), ms)),
+  ]);
+}
+async function __copiarOuBaixarPrint(blob, nome) {
+  if (navigator.clipboard && window.ClipboardItem) {
+    try {
+      await __printComTimeout(
+        navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]),
+        4000, 'Clipboard não respondeu'
+      );
+      return 'clip';
+    } catch (_) { /* segue para download */ }
+  }
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = nome;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return 'download';
+}
+
 const PIZZA_COLORS = [
   '#4f8ef7','#7c5cfc','#3ecf8e','#f5874a','#f55a5a',
   '#FFD700','#e056a0','#56c4e0','#a78bfa','#f97316',
@@ -527,20 +555,21 @@ function openSelectedYearDetail() {
 }
 async function shareTodaySummary() {
   const card = document.getElementById('todayShareCard');
-  if (!card || typeof html2canvas === 'undefined') return;
+  if (!card || typeof html2canvas === 'undefined' || _printExportBusy) return;
+  _printExportBusy = true;
   card.classList.add('capture-mode', 'today-capture-flash');
   await new Promise(resolve => setTimeout(resolve, 120));
   try {
-    const canvas = await html2canvas(card, {
+    const canvas = await __printComTimeout(html2canvas(card, {
       backgroundColor: null,
       scale: 2,
       useCORS: true,
       logging: false
-    });
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    }), 9000, 'Tempo esgotado ao gerar a imagem');
+    const blob = await __printComTimeout(new Promise(resolve => canvas.toBlob(resolve, 'image/png')), 5000, 'Tempo esgotado ao converter a imagem');
     if (!blob) throw new Error('Falha ao gerar imagem');
-    if (navigator.clipboard && window.ClipboardItem) {
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+    const destino = await __copiarOuBaixarPrint(blob, 'track-concursos-estudos-de-hoje.png');
+    if (destino === 'clip') {
       CT.toast('O de hoje tá pago 💪 Print pronto para colar com Ctrl + V! Poste no Twitter e marque o Track Concursos! @TrackConcursos', '📸');
       const toastEl = document.getElementById('ct-main-toast');
       if (toastEl) {
@@ -550,18 +579,13 @@ async function shareTodaySummary() {
         }, 9500);
       }
     } else {
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'track-concursos-estudos-de-hoje.png';
-      link.click();
-      URL.revokeObjectURL(url);
       CT.toast('Clipboard não suportado aqui. O print foi baixado.', '📸');
     }
   } catch (err) {
     console.error(err);
     CT.toast('Não foi possível gerar o print agora.', '❌');
   } finally {
+    _printExportBusy = false;
     card.classList.remove('capture-mode');
     setTimeout(() => card.classList.remove('today-capture-flash'), 380);
   }
@@ -698,31 +722,26 @@ function abrirPopupEstudosDia() {
 
 async function copiarPrintEstudosDia() {
   const card = document.getElementById('todayVerticalCapture');
-  if (!card || typeof html2canvas === 'undefined') return;
+  if (!card || typeof html2canvas === 'undefined' || _printExportBusy) return;
+  _printExportBusy = true;
+  CT.toast('Gerando imagem…', '⏳');
   try {
-    const canvas = await html2canvas(card, {
+    await new Promise(resolve => setTimeout(resolve, 0)); // deixa a UI pintar
+    const canvas = await __printComTimeout(html2canvas(card, {
       backgroundColor: null,
       scale: 2,
       useCORS: true,
       logging: false
-    });
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    }), 9000, 'Tempo esgotado ao gerar a imagem');
+    const blob = await __printComTimeout(new Promise(resolve => canvas.toBlob(resolve, 'image/png')), 5000, 'Tempo esgotado ao converter a imagem');
     if (!blob) throw new Error('Falha ao gerar imagem');
-    if (navigator.clipboard && window.ClipboardItem) {
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-      CT.toast('Imagem pronta para colar.', '📸');
-    } else {
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'track-concursos-estudos-do-dia.png';
-      link.click();
-      URL.revokeObjectURL(url);
-      CT.toast('Imagem baixada.', '📸');
-    }
+    const destino = await __copiarOuBaixarPrint(blob, 'track-concursos-estudos-do-dia.png');
+    CT.toast(destino === 'clip' ? 'Imagem pronta para colar.' : 'Imagem baixada.', '📸');
   } catch (err) {
     console.error(err);
     CT.toast('Não foi possível gerar a imagem agora.', '❌');
+  } finally {
+    _printExportBusy = false;
   }
 }
 
@@ -903,31 +922,26 @@ function abrirPopupDistribuicaoMateria() {
 
 async function copiarPrintDistribuicaoMateria() {
   const card = document.getElementById('materiaShareCapture');
-  if (!card || typeof html2canvas === 'undefined') return;
+  if (!card || typeof html2canvas === 'undefined' || _printExportBusy) return;
+  _printExportBusy = true;
+  CT.toast('Gerando imagem…', '⏳');
   try {
-    const canvas = await html2canvas(card, {
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const canvas = await __printComTimeout(html2canvas(card, {
       backgroundColor: null,
       scale: 2,
       useCORS: true,
       logging: false
-    });
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    }), 9000, 'Tempo esgotado ao gerar a imagem');
+    const blob = await __printComTimeout(new Promise(resolve => canvas.toBlob(resolve, 'image/png')), 5000, 'Tempo esgotado ao converter a imagem');
     if (!blob) throw new Error('Falha ao gerar imagem');
-    if (navigator.clipboard && window.ClipboardItem) {
-      await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
-      CT.toast('Imagem pronta para colar.', '📸');
-    } else {
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = 'track-concursos-distribuicao-por-materia.png';
-      link.click();
-      URL.revokeObjectURL(url);
-      CT.toast('Imagem baixada.', '📸');
-    }
+    const destino = await __copiarOuBaixarPrint(blob, 'track-concursos-distribuicao-por-materia.png');
+    CT.toast(destino === 'clip' ? 'Imagem pronta para colar.' : 'Imagem baixada.', '📸');
   } catch (err) {
     console.error(err);
     CT.toast('Não foi possível gerar a imagem agora.', '❌');
+  } finally {
+    _printExportBusy = false;
   }
 }
 
