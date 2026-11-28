@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta charset="utf-8" />
+  <meta name="generator" content="pandoc 3.12" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes" />
+  <title>Manual do Usuário — Track do Oodeus</title>
+  <style>
+    /* Default styles provided by pandoc.
+    ** See https://pandoc.org/MANUAL.html#variables-for-html for config info.
+    */
+    span.smallcaps{font-variant: small-caps;}
+    div.columns{display: flex; gap: 1.5em;}
+    div.column{flex: auto;}
+    @media screen {
+    div.columns{gap: min(4vw, 1.5em);}
+    div.column{overflow-x: auto;}
+    }
+    div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
+    /* The extra [class] is a hack that increases specificity enough to
+       override a similar rule in reveal.js */
+    ul.task-list[class]{list-style: none;}
+    ul.task-list li input[type="checkbox"] {
+      font-size: inherit;
+      width: 0.8em;
+      margin: 0 0.8em 0.2em -1.6em;
+      vertical-align: middle;
+    }
+  </style>
+  <link rel="stylesheet" href="estilo.css" />
+</head>
+<body>
+<h1 id="manual-do-usuário-track-do-oodeus">Manual do Usuário — Track do
+Oodeus</h1>
+<p><strong>Plugin do Obsidian para organizar estudos para
+concursos.</strong> Versão do plugin: <strong>1.0.7</strong> ·
+Atualizado em <strong>28/11/2026</strong></p>
+<blockquote>
+<p>Este manual foi feito para quem nunca usou o Obsidian nem o plugin.
+Comece pelo capítulo 1 e siga na ordem. As imagens mostram o plugin
+aberto no computador e no celular.</p>
+</blockquote>
+<hr />
+<h2 id="sumário">Sumário</h2>
+<ol type="1">
+<li><a href="#1-o-que-é-o-plugin">O que é o plugin</a></li>
+<li><a href="#2-noções-básicas-do-obsidian">Noções básicas do
+Obsidian</a></li>
+<li><a href="#3-instalar-e-atualizar">Instalar e atualizar</a></li>
+<li><a href="#4-primeiros-passos">Primeiros passos</a></li>
+<li><a href="#5-concursos">Concursos</a></li>
+<li><a href="#6-cadastro-de-edital">Cadastro de edital</a></li>
+<li><a href="#7-matéria-tópicos-e-subtópicos">Matéria, tópicos e
+subtópicos</a></li>
+<li><a href="#8-materiais-de-estudo-e-anotações">Materiais de estudo e
+Anotações</a></li>
+<li><a href="#9-cronômetro-pomodoro">Cronômetro Pomodoro</a></li>
+<li><a href="#10-cronograma-inteligente">Cronograma Inteligente</a></li>
+<li><a href="#11-flashcards">Flashcards</a></li>
+<li><a href="#12-dashboard-e-faixas">Dashboard e faixas</a></li>
+<li><a href="#13-revisões">Revisões</a></li>
+<li><a href="#14-métricas--histórico">Métricas / Histórico</a></li>
+<li><a href="#15-simulados">Simulados</a></li>
+<li><a href="#16-editais-premium">Editais Premium</a></li>
+<li><a href="#17-ajuda">Ajuda</a></li>
+<li><a href="#18-celular-e-tablet">Celular e tablet</a></li>
+<li><a href="#19-dados-backup-e-solução-de-problemas">Dados, backup e
+solução de problemas</a></li>
+<li><a href="#20-glossário-rápido">Glossário rápido</a></li>
+</ol>
+<hr />
+<h2 id="o-que-é-o-plugin">1. O que é o plugin</h2>
+<p>O <strong>Track do Oodeus</strong> é uma reconstrução do aplicativo
+<em>Track Concursos</em> dentro do Obsidian. Ele transforma o seu cofre
+de notas em um caderno de estudos interativo:</p>
+<ul>
+<li>você cadastra <strong>concursos</strong> e
+<strong>matérias</strong>;</li>
+<li>divide cada matéria em <strong>tópicos</strong> e
+<strong>subtópicos</strong>;</li>
+<li>registra <strong>questões</strong>, <strong>horas de estudo</strong>
+e <strong>simulados</strong>;</li>
+<li>acompanha <strong>faixas</strong> ( branca → preta ) conforme seu
+progresso;</li>
+<li>usa <strong>revisão espaçada</strong>, <strong>flashcards</strong>
+(SRS) e <strong>cronograma inteligente</strong>;</li>
+<li>guarda <strong>anotações</strong> ligadas a notas do próprio
+Obsidian;</li>
+<li>funciona no <strong>computador, celular e tablet</strong>.</li>
+</ul>
+<p>Tudo fica salvo dentro do seu cofre, no arquivo:</p>
+<pre><code>&lt;seu cofre&gt;/.obsidian/plugins/track-do-odeus/data.json</code></pre>
+<p>Ou seja: seus dados são seus, ficam no seu computador/celular, e não
+dependem de servidor.</p>
+<p><img src="imagens/01-concursos.png"
+alt="Tela inicial dos concursos" /> <em>Figura 1 — A tela “Meus
+Concursos”, ponto de partida para criar e abrir concursos.</em></p>
+<hr />
+<h2 id="noções-básicas-do-obsidian">2. Noções básicas do Obsidian</h2>
+<p>Se você nunca usou o Obsidian, leia esta parte com calma. Ela explica
+o que o plugin chama de “nota”, “vault” e “wikilink”.</p>
+<h3 id="o-que-é-um-cofre-vault">2.1 O que é um cofre (vault)</h3>
+<p>O Obsidian trabalha com uma pasta chamada <strong>cofre</strong> (do
+inglês <em>vault</em>). Tudo que aparece no Obsidian são arquivos dessa
+pasta — principalmente arquivos <code>.md</code> (Markdown), que são
+notas de texto simples.</p>
+<p>No seu caso, o cofre se chama <strong>Oodeus DB</strong>. Dentro dele
+existe uma pasta oculta <code>.obsidian</code>, onde ficam as
+configurações e os plugins — inclusive o Track do Oodeus.</p>
+<blockquote>
+<p><strong>Não apague a pasta <code>.obsidian</code>.</strong> É onde o
+plugin e seus dados vivem.</p>
+</blockquote>
+<h3 id="o-que-é-uma-nota">2.2 O que é uma nota</h3>
+<p>Uma <strong>nota</strong> é um arquivo <code>.md</code>. Você cria
+uma nota pelo botão <strong>＋</strong> no topo do Obsidian, ou clicando
+em uma sugestão de link. Cada nota tem um <strong>título</strong> (o
+nome do arquivo) e um conteúdo que você escreve livremente:</p>
+<pre><code># Minha nota de estudo
+
+Aqui eu escrevo o que quiser: resumo, fórmulas, dicas...</code></pre>
+<p>No lado esquerdo do Obsidian existe o <strong>Explorador de
+arquivos</strong> (ícone de dois papéis). Lá você vê a árvore de pastas
+e notas do cofre.</p>
+<h3 id="o-que-é-um-wikilink">2.3 O que é um wikilink
+<code>[[ ]]</code></h3>
+<p>Este é o recurso mais importante para entender as Anotações do
+plugin.</p>
+<p>Quando você digita <strong>dois colchetes abertos</strong>
+<code>[[</code> dentro de uma nota, o Obsidian abre uma lista com as
+notas existentes. Você continua digitando o nome, escolhe uma nota com a
+seta/Enter e o Obsidian insere automaticamente:</p>
+<pre><code>[[Nome da nota]]</code></pre>
+<p>Isso é um <strong>link interno</strong>: clicando nele, você abre
+aquela nota. Não precisa copiar caminho nem URL.</p>
+<p>O plugin Track do Oodeus reproduz esse comportamento no campo
+<strong>Link</strong> do modal de material (capítulo 8).</p>
+<p><img src="imagens/12-anotacoes-wikilink.png"
+alt="Modal de material com o autocomplete de notas" /> <em>Figura 2 —
+Digitando <code>[[</code> no campo Link, o plugin sugere notas do seu
+cofre, exatamente como o Obsidian.</em></p>
+<h3 id="como-o-plugin-usa-suas-notas">2.4 Como o plugin usa suas
+notas</h3>
+<p>O tipo de material <strong>Anotações</strong> não guarda um link da
+internet: ele guarda o <strong>caminho de uma nota do seu
+cofre</strong>. Quando você clica em “Abrir” nesse material, o plugin
+abre a nota dentro do próprio Obsidian — não cria outra nota, não abre o
+navegador.</p>
+<hr />
+<h2 id="instalar-e-atualizar">3. Instalar e atualizar</h2>
+<h3 id="pelo-brat-recomendado">3.1 Pelo BRAT (recomendado)</h3>
+<p>O <strong>BRAT</strong> é um plugin do Obsidian que instala e
+atualiza outros plugins direto do GitHub.</p>
+<ol type="1">
+<li><p>No Obsidian, abra <strong>Configurações → Plugins da
+comunidade</strong>.</p></li>
+<li><p>Procure por <strong>BRAT</strong>, clique em
+<strong>Instalar</strong> e depois em <strong>Ativar</strong>.</p></li>
+<li><p>Volte em <strong>Configurações → BRAT</strong> e clique em
+<strong>Add beta plugin</strong>.</p></li>
+<li><p>No campo <em>Repository</em>, digite exatamente:</p>
+<pre><code>oodeus369-byte/track-do-oodeus</code></pre></li>
+<li><p>Clique em <strong>Select a version</strong> e escolha a release
+mais recente (<code>v1.0.5</code> ou superior).</p></li>
+<li><p>Clique em <strong>ADD PLUGIN</strong>.</p></li>
+<li><p>Em <strong>Plugins instalados</strong>, habilite <strong>Track do
+Oodeus</strong>.</p></li>
+</ol>
+<p>O repositório é <strong>público</strong>, então não precisa de token
+do GitHub.</p>
+<p>Para atualizar no futuro: abra o BRAT e clique em <strong>Update
+plugins</strong>. Depois <strong>recarregue o Obsidian</strong> (Ctrl+R
+ou feche e abra o app) para o novo <code>main.js</code> entrar em
+memória.</p>
+<h3 id="instalação-manual">3.2 Instalação manual</h3>
+<p>Se não quiser usar o BRAT:</p>
+<ol type="1">
+<li><p>No GitHub, clique em <strong>Code → Download
+ZIP</strong>.</p></li>
+<li><p>Extraia o ZIP.</p></li>
+<li><p>Copie <code>manifest.json</code> e <code>main.js</code> para:</p>
+<pre><code>&lt;seu cofre&gt;/.obsidian/plugins/track-do-odeus/</code></pre></li>
+<li><p>Habilite o plugin em <strong>Configurações → Plugins
+instalados</strong>.</p></li>
+<li><p>Recarregue o Obsidian.</p></li>
+</ol>
+<blockquote>
+<p>Desde a versão v1.0.3 os <strong>92 assets</strong> (imagens, ícones,
+faixas) vão embutidos dentro do <code>main.js</code>. Não é mais preciso
+copiar a pasta <code>assets/</code>.</p>
+</blockquote>
+<h3 id="atenção-ao-usar-dois-aparelhos">3.3 Atenção ao usar dois
+aparelhos</h3>
+<p>Se você usa o mesmo cofre no PC e no celular com
+<strong>Syncthing</strong>:</p>
+<ul>
+<li>nunca apague arquivos <code>sync-conflict</code> sem comparar o
+conteúdo;</li>
+<li>se aparecer conflito, confira qual lado tem o <code>main.js</code>
+mais recente;</li>
+<li>para desinstalar/reinstalar pelo BRAT no mesmo aparelho,
+<strong>desative a cópia antiga primeiro</strong> (o ID do plugin é
+sempre <code>track-do-odeus</code>).</li>
+</ul>
+<hr />
+<h2 id="primeiros-passos">4. Primeiros passos</h2>
+<h3 id="abrindo-o-plugin">4.1 Abrindo o plugin</h3>
+<p>O plugin aparece como um ícone na barra lateral esquerda do Obsidian
+(um <strong>foguete</strong>). Clique nele para abrir uma aba com o
+painel do Track.</p>
+<p>Você também pode usar o comando <strong>Track do Oodeus: Abrir
+Track</strong> na paleta de comandos (Ctrl+P).</p>
+<p>Ao abrir, a primeira tela é <strong>Meus Concursos</strong>. Se você
+ainda não tem nenhum concurso, clique em <strong>+ Cadastrar Novo
+Concurso</strong>.</p>
+<h3 id="a-barra-lateral-do-plugin">4.2 A barra lateral do plugin</h3>
+<p>Dentro do painel do Track há uma barra lateral própria, com:</p>
+<ul>
+<li>o nome <strong>Track do Oodeus</strong> (identificação “Inspirado em
+Track Concursos”);</li>
+<li><strong>MENU</strong>: Meus Concursos, Dashboard, Cronograma
+Inteligente, Revisões, Flashcards, Métricas, Simulados, Ajuda;</li>
+<li>o <strong>concurso ativo</strong> (nome, banca, cargo e dias para a
+prova).</li>
+</ul>
+<p>Para navegar, basta clicar no item desejado. O plugin troca de página
+sem sair do Obsidian.</p>
+<p>No celular, essa barra vira um <strong>painel deslizante</strong>:
+use o botão <strong>☰</strong> no canto superior para abrir/fechar.
+Toque fora do painel para fechar.</p>
+<p><img src="imagens/14-celular-retrato.png"
+alt="Painel no celular em pé" /> <em>Figura 3 — No celular, o botão ☰
+abre e fecha a barra lateral.</em></p>
+<hr />
+<h2 id="concursos">5. Concursos</h2>
+<p>A página <strong>Meus Concursos</strong> é o ponto de partida.</p>
+<h3 id="criar-um-concurso">Criar um concurso</h3>
+<ol type="1">
+<li>Clique em <strong>+ Cadastrar Novo Concurso</strong>.</li>
+<li>Preencha:
+<ul>
+<li><strong>Nome</strong> (ex.: “Polícia Civil de Minas Gerais”);</li>
+<li><strong>Cargo</strong> (ex.: “Agente”);</li>
+<li><strong>Banca</strong> (ex.: “FGV”);</li>
+<li><strong>Data da prova</strong>.</li>
+</ul></li>
+<li>Salve. O concurso aparece no mural.</li>
+</ol>
+<h3 id="selecionar-o-concurso-ativo">Selecionar o concurso ativo</h3>
+<p>Clique no cartão do concurso. Ele passa a ser o <strong>concurso
+ativo</strong> — todas as páginas do plugin trabalham com ele. O nome e
+a contagem de dias aparecem na barra lateral.</p>
+<h3 id="o-que-o-plugin-calcula">O que o plugin calcula</h3>
+<p>No mural você vê estatísticas gerais (horas totais, questões
+resolvidas, taxa de acertos, simulados) e a seção <strong>Concursos em
+foco total</strong>, com o gráfico de prioridade.</p>
+<p>Depois de criar o concurso, o próximo passo é cadastrar as matérias —
+feito na página de cadastro de edital.</p>
+<hr />
+<h2 id="cadastro-de-edital">6. Cadastro de edital</h2>
+<p>Nesta página você importa ou monta a estrutura de matérias e tópicos
+do seu edital.</p>
+<ol type="1">
+<li>Abra <strong>Meus Concursos → Cadastrar edital</strong> (ou o atalho
+no cartão do concurso).</li>
+<li>Você pode:
+<ul>
+<li><strong>colar o JSON</strong> de um edital (obtido nos Editais
+Premium ou de outro concurso já instalado);</li>
+<li><strong>escrever/editar</strong> o conteúdo do edital no campo de
+texto;</li>
+<li>usar <strong>Prompt Google Drive</strong>, <strong>Importar
+links</strong> ou <strong>Zerar links</strong> quando precisar.</li>
+</ul></li>
+<li>Clique em <strong>Salvar alterações</strong>.</li>
+</ol>
+<p>Dica: se você instalou um edital premium (capítulo 16), a estrutura
+já vem pronta — não é preciso digitar nada.</p>
+<p><img src="imagens/02-cadastro.png" alt="Cadastro de edital" />
+<em>Figura 4 — Tela de cadastro/edição do edital.</em></p>
+<hr />
+<h2 id="matéria-tópicos-e-subtópicos">7. Matéria, tópicos e
+subtópicos</h2>
+<p>A página <strong>Matéria</strong> é onde você estuda de verdade.</p>
+<p><img src="imagens/03-materia.png" alt="Página de matéria" />
+<em>Figura 5 — Matéria “Língua Portuguesa” com um tópico e seus
+botões.</em></p>
+<h3 id="estrutura">7.1 Estrutura</h3>
+<ul>
+<li><strong>Matéria</strong> (ex.: Língua Portuguesa)
+<ul>
+<li><strong>Tópico</strong> (ex.: Compreensão e interpretação de textos)
+<ul>
+<li><strong>Subtópico</strong> (ex.: Tipologias textuais)</li>
+</ul></li>
+</ul></li>
+</ul>
+<p>Clique no nome de um tópico para <strong>expandir</strong> e ver os
+subtópicos e o conteúdo.</p>
+<h3 id="botões-de-cada-tópicosubtópico">7.2 Botões de cada
+tópico/subtópico</h3>
+<p>Na linha de cada item aparecem cinco controles:</p>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Botão</th>
+<th>O que faz</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>⏱️</strong> (cronômetro)</td>
+<td>Inicia um cronômetro livre já ligado àquela matéria/tópico.</td>
+</tr>
+<tr>
+<td><strong>＋</strong> (mais)</td>
+<td>Abre o modal <strong>Material de estudo</strong> para adicionar
+links, PDFs, vídeos, anotações etc.</td>
+</tr>
+<tr>
+<td><strong>✓</strong> (check)</td>
+<td>Marca o item como <strong>estudado</strong> e abre o popup para
+agendar revisão (5/7/15/30 dias ou data).</td>
+</tr>
+<tr>
+<td><strong>🗓 MARCAR REVISÃO</strong></td>
+<td>Agenda uma revisão manual para aquele item, sem marcar como
+estudado.</td>
+</tr>
+<tr>
+<td><strong>⋮</strong> (opções)</td>
+<td>Abre o menu com renomear, excluir e outras ações.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="material-geral-da-matéria">7.3 Material geral da matéria</h3>
+<p>No topo da página existe o cartão <strong>Material geral da
+matéria</strong>, com o botão <strong>＋</strong>. Use-o para materiais
+que valem para a matéria inteira (playlists, livros, cadernos), em vez
+de um tópico específico.</p>
+<h3 id="noções-de-progresso">7.4 Noções de progresso</h3>
+<p>No topo aparecem:</p>
+<ul>
+<li><strong>% de tópicos concluídos</strong>;</li>
+<li><strong>Horas</strong>, <strong>Questões</strong> e
+<strong>Acertos</strong> da matéria.</li>
+</ul>
+<p>Eles são atualizados automaticamente quando você registra questões ou
+usa o cronômetro.</p>
+<hr />
+<h2 id="materiais-de-estudo-e-anotações">8. Materiais de estudo e
+Anotações</h2>
+<p>Ao clicar no <strong>＋</strong> de um tópico, abre-se o modal
+<strong>Material de estudo</strong>:</p>
+<ol type="1">
+<li>Escolha o <strong>tipo</strong>: Caderno de Questões, PDF,
+Videoaula, Flashcards ou <strong>Anotações</strong>.</li>
+<li>Digite o <strong>Nome</strong>.</li>
+<li>Preencha o <strong>Link</strong>:
+<ul>
+<li>para links externos, cole a URL completa
+(<code>https://...</code>);</li>
+<li>para <strong>Anotações</strong>, use <code>[[</code> para escolher
+uma nota do seu cofre.</li>
+</ul></li>
+<li>Clique em <strong>Adicionar</strong> ou <strong>+ Adicionar em
+sequência</strong> (para cadastrar vários seguidos).</li>
+</ol>
+<p>Depois de adicionado, o material aparece na lista com os botões
+<strong>EDITAR</strong>, <strong>ABRIR</strong>, <strong>MARCAR
+ESTUDADO</strong> e <strong>EXCLUIR</strong>.</p>
+<h3 id="usando-no-campo-link">8.1 Usando <code>[[</code> no campo
+Link</h3>
+<ol type="1">
+<li>Coloque o cursor no campo <strong>Link</strong>.</li>
+<li>Digite <code>[[</code>.</li>
+<li>Comece a escrever o nome da nota — aparece uma lista de
+sugestões.</li>
+<li>Clique na nota desejada (ou use ↑/↓ + Enter).</li>
+<li>O campo fica com <code>[[Nome da nota]]</code>.</li>
+<li>Clique em <strong>Adicionar</strong>.</li>
+</ol>
+<h3 id="abrindo-a-nota-depois">8.2 Abrindo a nota depois</h3>
+<p>No popup de materiais, clique em <strong>ABRIR</strong>. O plugin
+localiza a nota no cofre e a abre no Obsidian. Se a nota não existir
+mais, aparece um aviso — ele <strong>não cria</strong> uma nota
+nova.</p>
+<blockquote>
+<p>Se você não sabe o que é nota ou <code>[[ ]]</code>, volte ao
+capítulo 2.</p>
+</blockquote>
+<h3 id="caminho-universal-arquivo-do-vault">8.3 Caminho universal:
+arquivo do vault</h3>
+<p>Para PDFs, vídeos e outros arquivos, <strong>não use um caminho do
+computador</strong> (<code>C:\...</code>) se você também usa o
+celular/tablet: esse caminho só existe naquele aparelho. Use o botão
+<strong>📎 Buscar arquivo do vault</strong>:</p>
+<ol type="1">
+<li>Coloque o arquivo (PDF, vídeo, imagem) em alguma pasta do seu cofre
+Obsidian.</li>
+<li>No modal de material, clique em <strong>📎 Buscar arquivo do
+vault</strong>.</li>
+<li>Escolha o arquivo na lista. O campo Link recebe o <strong>caminho
+relativo</strong>, por exemplo <code>Materiais/aula.pdf</code>.</li>
+<li>Clique em <strong>Adicionar</strong>.</li>
+</ol>
+<p>Esse caminho é o <strong>mesmo no computador, no celular e no
+tablet</strong>, porque o cofre é sincronizado. Não aparece mais o aviso
+“link bloqueado por segurança” e não é preciso ter
+<code>https://</code>.</p>
+<p>Se você colar um caminho absoluto do Android (ex.:
+<code>/storage/emulated/0/Download/aula.pdf</code>), o plugin converte
+para <code>file:///storage/...</code> automaticamente — mas o arquivo
+pode não existir nos outros aparelhos. Por isso, <strong>prefira sempre
+o botão do vault</strong>.</p>
+<p><strong>Regra importante para PDF e vídeo:</strong> se o arquivo
+estiver <strong>dentro do cofre</strong>, o botão <strong>Abrir</strong>
+usa o <strong>visualizador nativo de PDF do próprio Obsidian</strong> —
+você <strong>não precisa instalar nenhum plugin de PDF</strong> (o
+Obsidian já vem com ele). O PDF abre em uma aba do Obsidian, junto das
+suas notas. Se o arquivo estiver <strong>fora do cofre</strong> (caminho
+<code>C:\...</code>, <code>/storage/...</code> ou uma URL externa), o
+plugin abre no <strong>aplicativo externo</strong> do dispositivo — e
+esse caminho pode não funcionar em outros aparelhos. Para abrir sempre
+dentro do Obsidian: <strong>coloque o PDF em uma pasta do cofre e
+adicione pelo botão 📎 Buscar arquivo do vault.</strong></p>
+<hr />
+<h2 id="cronômetro-pomodoro">9. Cronômetro Pomodoro</h2>
+<p>O cronômetro é um <strong>botão flutuante</strong> (FAB) com ícone de
+relógio. Ele aparece quando você está em uma tela de estudo.</p>
+<p><img src="imagens/13-cronometro.png" alt="Popup do cronômetro" />
+<em>Figura 6 — Painel do cronômetro com os modos Livre e
+Pomodoro.</em></p>
+<h3 id="abrir">9.1 Abrir</h3>
+<ul>
+<li>Clique no relógio flutuante.</li>
+<li>Ou clique no botão <strong>⏱️</strong> de um tópico para iniciar um
+cronômetro já ligado àquele item.</li>
+</ul>
+<h3 id="modos">9.2 Modos</h3>
+<ul>
+<li><strong>LIVRE</strong>: cronômetro comum, você escolhe matéria,
+tópico e subtópico.</li>
+<li><strong>POMODORO</strong>: ciclos de foco (25 min) e pausa (5/15
+min).</li>
+</ul>
+<p>Use os botões de play, pause/parar e reiniciar no painel.</p>
+<h3 id="mover-o-relógio">9.3 Mover o relógio</h3>
+<ul>
+<li><strong>No computador:</strong> arraste o botão flutuante com o
+mouse para qualquer lugar da tela. A posição é lembrada.</li>
+<li><strong>No celular:</strong> toque e arraste com o dedo. O botão
+para de aparecer quando você fecha a aba do plugin — não fica solto no
+Obsidian.</li>
+</ul>
+<h3 id="registrar-a-sessão">9.4 Registrar a sessão</h3>
+<p>Ao parar, o plugin abre um modal para salvar a sessão com matéria,
+tópico, questões feitas, acertos e observações. Depois de salvar, o
+tempo entra nas estatísticas e no cronograma.</p>
+<hr />
+<h2 id="cronograma-inteligente">10. Cronograma Inteligente</h2>
+<p>Nesta página você monta automaticamente um plano de estudos.</p>
+<ol type="1">
+<li>Abra <strong>Cronograma Inteligente</strong> no menu.</li>
+<li>Se ainda não houver plano, clique em <strong>COMEÇAR
+AGORA</strong>.</li>
+<li>Escolha a matéria/tópico, defina a <strong>meta</strong> e a
+<strong>prioridade</strong>.</li>
+<li>O plugin gera uma grade semanal com os blocos de estudo.</li>
+<li>Você pode <strong>editar</strong> blocos, marcar como feitos e
+acompanhar o progresso.</li>
+</ol>
+<p><img src="imagens/04-cronograma.png" alt="Cronograma inteligente" />
+<em>Figura 7 — Grade semanal do Cronograma Inteligente.</em></p>
+<p>Dica: o cronograma usa os dados que você registra nas sessões de
+estudo (capítulo 9). Quanto mais você registra, melhores são as
+sugestões.</p>
+<hr />
+<h2 id="flashcards">11. Flashcards</h2>
+<p>Os flashcards funcionam como um <strong>caderno de perguntas e
+respostas com repetição espaçada (SRS)</strong>: as cartas difíceis
+aparecem mais vezes; as fáceis, menos.</p>
+<ol type="1">
+<li>No menu, clique em <strong>Flashcards</strong>.</li>
+<li>Clique em <strong>+ Novo baralho</strong> e dê um nome.</li>
+<li>Abra o baralho e clique em ** Adicionar cartão** (ou
+equivalente).</li>
+<li>Escreva a <strong>frente</strong> (pergunta) e o
+<strong>verso</strong> (resposta).</li>
+<li>Para estudar, clique em <strong>Estudar</strong>. Vire a carta e
+avalie: novamente / difícil / bom / fácil.</li>
+<li>Use <strong>Exportar JSON</strong> ou <strong>Exportar CSV</strong>
+para guardar seus baralhos.</li>
+</ol>
+<p><img src="imagens/05-flashcards.png" alt="Flashcards" /> <em>Figura 8
+— Painel “Meus Baralhos” com estatísticas.</em></p>
+<p>Você também pode criar flashcards a partir de um material do tipo
+<strong>Flashcards</strong> dentro de um tópico.</p>
+<hr />
+<h2 id="dashboard-e-faixas">12. Dashboard e faixas</h2>
+<p>O <strong>Dashboard</strong> é a visão geral do concurso ativo:</p>
+<ul>
+<li>cartões com horas estudadas, questões resolvidas, taxa de acertos,
+último simulado e tópicos concluídos;</li>
+<li>lista de matérias com progresso;</li>
+<li>cronograma semanal;</li>
+<li>painel da prova (configuração de questões, pesos e modo
+CEbraspe/Tradicional);</li>
+<li><strong>sistema de faixas</strong>.</li>
+</ul>
+<h3 id="sistema-de-faixas">12.1 Sistema de faixas</h3>
+<p>As faixas vão de <strong>Branca → Amarela → Vermelha → Laranja →
+Verde → Roxa → Marrom → Preta</strong>. Cada faixa exige dias de estudo,
+questões e simulados com 80% de acerto. A regra é: <strong>qualquer
+métrica isolada que bata já avança</strong> de faixa — com bônus de
+cobertura e proteção contra regressão.</p>
+<p>A Faixa Preta tem uma celebração especial.</p>
+<p><img src="imagens/06-dashboard.png" alt="Dashboard" /> <em>Figura 9 —
+Dashboard com as estatísticas e o cronograma da semana.</em></p>
+<hr />
+<h2 id="revisões">13. Revisões</h2>
+<p>A página <strong>Revisões</strong> organiza o que precisa ser
+revisitado.</p>
+<ul>
+<li>Veja os cards <strong>Atrasadas</strong>, <strong>Para
+hoje</strong>, <strong>Próximas</strong> e <strong>Revisões
+concluídas</strong>.</li>
+<li>Clique em um tópico para abrir o popup de revisão (5/7/15/30 dias ou
+data personalizada).</li>
+<li>O botão <strong>MARCAR REVISÃO</strong> em um tópico faz o mesmo sem
+marcar o item como estudado.</li>
+<li>Ao concluir uma revisão, marque como feita; o item sai da lista de
+pendentes.</li>
+</ul>
+<p><img src="imagens/07-revisoes.png" alt="Revisões" /> <em>Figura 10 —
+Painel de revisões pendentes.</em></p>
+<hr />
+<h2 id="métricas-histórico">14. Métricas / Histórico</h2>
+<p>A página <strong>Métricas</strong> (History) mostra os gráficos e o
+histórico de estudo:</p>
+<ul>
+<li>heatmap estilo GitHub (níveis de intensidade por dia);</li>
+<li>análise por matéria (top 6);</li>
+<li>gráfico de pizza em horas com recorte;</li>
+<li>“Estudos do dia”;</li>
+<li>cards de PRINT para compartilhar.</li>
+</ul>
+<h3 id="exportar-imagem-printcopiar">14.1 Exportar imagem
+(print/copiar)</h3>
+<ol type="1">
+<li>Abra um dos cards PRINT.</li>
+<li>Clique em <strong>COPIAR IMAGEM</strong>.</li>
+<li>Se o navegador permitir, a imagem fica pronta para colar
+(Ctrl+V).</li>
+<li>Se não permitir, o plugin <strong>baixa o PNG</strong>
+automaticamente.</li>
+</ol>
+<p>O botão mostra “Gerando imagem…” e nunca trava a tela: se a cópia
+demorar, ele cai para download.</p>
+<p><img src="imagens/08-metricas.png" alt="Métricas" /> <em>Figura 11 —
+Página de Métricas com heatmap e gráficos.</em></p>
+<hr />
+<h2 id="simulados">15. Simulados</h2>
+<p>Aqui você registra simulados realizados e acompanha a evolução.</p>
+<ol type="1">
+<li>Clique em <strong>Registrar simulado</strong>.</li>
+<li>Preencha:
+<ul>
+<li><strong>Tipo</strong> de simulado;</li>
+<li><strong>Tempo gasto</strong>;</li>
+<li><strong>Nota</strong> e total de questões;</li>
+<li><strong>Modo de registro</strong> (manual ou cálculo
+automático);</li>
+<li><strong>Raio-x por matéria</strong> (acertos/erros por
+matéria).</li>
+</ul></li>
+<li>Salve.</li>
+</ol>
+<p>O plugin calcula percentual, nota de corte e atualiza o gráfico de
+evolução. É possível <strong>editar</strong> e <strong>deletar</strong>
+simulados.</p>
+<p><img src="imagens/09-simulados.png" alt="Simulados" /> <em>Figura 12
+— Página de Simulados.</em></p>
+<hr />
+<h2 id="editais-premium">16. Editais Premium</h2>
+<p>Esta página mostra um catálogo de editais mantido pelo
+<strong>desenvolvedor original</strong>, fora do seu plugin.</p>
+<h3 id="de-onde-vêm-os-editais">16.1 De onde vêm os editais</h3>
+<p>O catálogo é baixado de:</p>
+<pre><code>https://raw.githubusercontent.com/michel-softwares/Editais-Premium/main/catalog.json</code></pre>
+<h3 id="como-atualizar">16.2 Como atualizar</h3>
+<ol type="1">
+<li>Abra <strong>Editais Premium</strong> no menu.</li>
+<li>Clique em <strong>Atualizar</strong> para buscar o catálogo mais
+recente.</li>
+<li>Clique em <strong>Instalar</strong> no edital desejado.</li>
+</ol>
+<p>O plugin baixa o arquivo do edital e o importa como um novo concurso
+no seu vault. Depois de instalado, o edital <strong>não depende mais da
+internet</strong> — os dados já estão no seu cofre.</p>
+<blockquote>
+<p><strong>Não é preciso atualizar o plugin para receber editais
+novos.</strong> Quando o desenvolvedor publica algo novo no catálogo,
+basta abrir a página ou clicar em Atualizar. Se estiver sem internet, o
+plugin mostra a última cópia salva em cache.</p>
+</blockquote>
+<p><img src="imagens/10-editais.png" alt="Editais premium" /> <em>Figura
+13 — Catálogo de Editais Premium.</em></p>
+<hr />
+<h2 id="ajuda">17. Ajuda</h2>
+<p>A página <strong>Ajuda</strong> traz links úteis, informações sobre o
+projeto e formas de apoiar. Use-a quando tiver dúvidas rápidas ou quiser
+conferir a versão instalada.</p>
+<p><img src="imagens/11-ajuda.png" alt="Ajuda" /> <em>Figura 14 — Página
+de Ajuda.</em></p>
+<hr />
+<h2 id="celular-e-tablet">18. Celular e tablet</h2>
+<p>O plugin é <strong>mobile-friendly</strong>: funciona em retrato,
+paisagem, tablet e computador.</p>
+<ul>
+<li><strong>Retrato:</strong> a barra lateral fica escondida; use
+<strong>☰</strong> para abrir. O nome dos tópicos ocupa uma linha
+inteira e os botões vão para a linha seguinte.</li>
+<li><strong>Paisagem:</strong> mais espaço; os cards se organizam em
+colunas.</li>
+<li><strong>Tablet:</strong> layout intermediário.</li>
+<li>O relógio flutuante pode ser <strong>arrastado com o dedo</strong>;
+clicar nele abre o painel.</li>
+<li>O painel do cronômetro é centralizado e limitado à largura da tela —
+nunca fica cortado.</li>
+</ul>
+<p><img src="imagens/15-celular-paisagem.png"
+alt="Celular em paisagem" /> <em>Figura 15 — Vista em paisagem no
+celular.</em></p>
+<p>Dica: no celular, use o menu <strong>☰</strong> para alternar
+rapidamente entre Concursos, Dashboard, Matéria e as demais páginas.</p>
+<hr />
+<h2 id="dados-backup-e-solução-de-problemas">19. Dados, backup e solução
+de problemas</h2>
+<h3 id="onde-estão-seus-dados">19.1 Onde estão seus dados</h3>
+<ul>
+<li><strong>Dados do plugin:</strong>
+<code>.obsidian/plugins/track-do-odeus/data.json</code> (concursos,
+matérias, tópicos, sessões, simulados etc.).</li>
+<li><strong>Notas do Obsidian:</strong> arquivos <code>.md</code>
+espalhados pelo cofre.</li>
+<li><strong>Configurações do plugin:</strong> pasta
+<code>.obsidian/plugins/track-do-odeus/</code>.</li>
+</ul>
+<h3 id="backup">19.2 Backup</h3>
+<p>O resgate automático fica em:</p>
+<pre><code>C:\Users\maest\Backups\track-resgate-2026-11-26\</code></pre>
+<p>Lá estão o <code>main.js</code>, o <code>data.json</code> e os
+projetos de código. O <code>deploy.js</code> foi corrigido para
+<strong>nunca apagar o <code>data.json</code></strong> — ele faz cópia
+com timestamp antes de atualizar o plugin.</p>
+<h3 id="problemas-comuns">19.3 Problemas comuns</h3>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Sintoma</th>
+<th>O que fazer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Imagem de faixa/logo quebrada</td>
+<td>Atualize para v1.0.3+; os assets estão embutidos.</td>
+</tr>
+<tr>
+<td>Não aparece o botão ☰ no celular</td>
+<td>Recarregue o Obsidian após atualizar.</td>
+</tr>
+<tr>
+<td>Barra lateral não abre</td>
+<td>Toque em ☰; para fechar, toque fora do painel.</td>
+</tr>
+<tr>
+<td>Botões da matéria não respondem</td>
+<td>Verifique se há um modal invisível: recarregue a página do
+plugin.</td>
+</tr>
+<tr>
+<td>FAB não arrasta no celular</td>
+<td>Atualize para v1.0.2+; use toque e arraste.</td>
+</tr>
+<tr>
+<td>“Link bloqueado por segurança”</td>
+<td>Use <code>[[Nota]]</code> para notas do vault e
+<code>https://...</code> para links externos.</td>
+</tr>
+<tr>
+<td>PDF abre em aplicativo externo</td>
+<td>O PDF está fora do cofre. Coloque-o em uma pasta do Obsidian e
+adicione com <strong>📎 Buscar arquivo do vault</strong>. O leitor de
+PDF do Obsidian é nativo.</td>
+</tr>
+<tr>
+<td>Editais premium não carregam</td>
+<td>Verifique a internet e clique em Atualizar; sem rede, aparece o
+cache.</td>
+</tr>
+<tr>
+<td>Configurações do Obsidian parecem não abrir</td>
+<td>Elas abrem em uma janela separada; use <strong>Alt+Tab</strong> para
+trazer “Configurações - Oodeus” para frente.</td>
+</tr>
+<tr>
+<td>Conflito no Syncthing</td>
+<td>Não apague na dúvida: compare os arquivos e mantenha o
+<code>main.js</code> mais recente.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="recarregando-o-plugin">19.4 Recarregando o plugin</h3>
+<p>Depois de qualquer atualização: <strong>Ctrl+R</strong> no Obsidian
+(ou feche e reabra o app). Isso garante que o novo <code>main.js</code>
+seja carregado.</p>
+<hr />
+<h2 id="glossário-rápido">20. Glossário rápido</h2>
+<table>
+<colgroup>
+<col style="width: 50%" />
+<col style="width: 50%" />
+</colgroup>
+<thead>
+<tr>
+<th>Termo</th>
+<th>Significado simples</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Vault / cofre</strong></td>
+<td>A pasta onde o Obsidian guarda suas notas.</td>
+</tr>
+<tr>
+<td><strong>Nota</strong></td>
+<td>Um arquivo <code>.md</code> que você escreve no Obsidian.</td>
+</tr>
+<tr>
+<td><strong>Wikilink <code>[[ ]]</code></strong></td>
+<td>Link interno para outra nota; digitando <code>[[</code> o Obsidian
+sugere notas.</td>
+</tr>
+<tr>
+<td><strong>Plugin</strong></td>
+<td>Um complemento que adiciona funções ao Obsidian.</td>
+</tr>
+<tr>
+<td><strong>Concurso ativo</strong></td>
+<td>O concurso que o plugin está usando no momento.</td>
+</tr>
+<tr>
+<td><strong>Matéria</strong></td>
+<td>Matéria de estudo dentro do concurso.</td>
+</tr>
+<tr>
+<td><strong>Tópico / subtópico</strong></td>
+<td>Divisões da matéria.</td>
+</tr>
+<tr>
+<td><strong>Faixa</strong></td>
+<td>Nível de progresso (Branca a Preta).</td>
+</tr>
+<tr>
+<td><strong>SRS</strong></td>
+<td>Repetição espaçada: sistema dos flashcards.</td>
+</tr>
+<tr>
+<td><strong>Pomodoro</strong></td>
+<td>Técnica de foco com blocos de 25 min e pausas.</td>
+</tr>
+<tr>
+<td><strong>RAW / storage</strong></td>
+<td>Dados brutos salvos pelo plugin em <code>data.json</code>.</td>
+</tr>
+<tr>
+<td><strong>BRAT</strong></td>
+<td>Plugin que instala/atualiza plugins do GitHub.</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<p><strong>Fim do manual.</strong></p>
+<p><em>Track do Oodeus — versão 1.0.7 · “Inspirado em Track Concursos”.
+Repositório: <code>oodeus369-byte/track-do-oodeus</code>.</em></p>
+</body>
+</html>

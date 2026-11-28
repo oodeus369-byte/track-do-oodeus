@@ -1,4 +1,4 @@
-﻿# Track do Oodeus
+# Track do Oodeus
 
 Plugin do Obsidian — reconstrução fiel do aplicativo **Track Concursos v1.0.7** (concursos, cadastro de edital, matérias e tópicos, revisão espaçada, Pomodoro, cronograma, flashcards, dashboard, revisões, histórico, simulados, editais premium e ajuda), adaptado a PC, tablet e celular.
 
@@ -56,3 +56,7 @@ O repositório NÃO contém `data.json` — ele guarda só o plugin. Seus concur
 
 O código está aberto: ideias, correções e melhorias são bem-vindas via **Issues** e **Pull Requests**. Antes de mexer, rode a suíte em `source/` (`node tests\*.test.js`) e regenere o bundle com `npm run build`. Os logos de terceiros foram removidos e substituídos por arte original com a identificação **“Inspirado em Track Concursos”** — os nomes de arquivo foram mantidos para compatibilidade com o código e os testes.
 
+
+## Manual do usuário
+
+O manual completo (em português, com prints e passo a passo) está em [Manual-do-Usuario/Manual-do-Usuario.pdf](Manual-do-Usuario/Manual-do-Usuario.pdf). Também há versão Markdown editável na mesma pasta.
