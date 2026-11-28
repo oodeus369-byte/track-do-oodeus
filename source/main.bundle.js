@@ -17,8 +17,10 @@ var require_host = __commonJS({
     var _hostAssetUrl = null;
     var _hostListVaultNotes = null;
     var _hostPickVaultNote = null;
+    var _hostListVaultFiles = null;
+    var _hostPickVaultFile = null;
     var _hostOpenVaultNote = null;
-    function initHost2({ data = null, persist = null, window: hostWindow, navigate = null, currentPage = null, assetBase = null, assetUrl = null, listVaultNotes = null, pickVaultNote = null, openVaultNote = null } = {}) {
+    function initHost2({ data = null, persist = null, window: hostWindow, navigate = null, currentPage = null, assetBase = null, assetUrl = null, listVaultNotes = null, pickVaultNote = null, listVaultFiles = null, pickVaultFile = null, openVaultNote = null } = {}) {
       _hostData = data && typeof data === "object" ? data : {};
       _hostPersist = typeof persist === "function" ? persist : null;
       _hostNavigate = typeof navigate === "function" ? navigate : null;
@@ -27,6 +29,8 @@ var require_host = __commonJS({
       _hostAssetUrl = typeof assetUrl === "function" ? assetUrl : null;
       _hostListVaultNotes = typeof listVaultNotes === "function" ? listVaultNotes : null;
       _hostPickVaultNote = typeof pickVaultNote === "function" ? pickVaultNote : null;
+      _hostListVaultFiles = typeof listVaultFiles === "function" ? listVaultFiles : null;
+      _hostPickVaultFile = typeof pickVaultFile === "function" ? pickVaultFile : null;
       _hostOpenVaultNote = typeof openVaultNote === "function" ? openVaultNote : null;
       _hostLoaded = true;
       const api = {
@@ -116,6 +120,21 @@ var require_host = __commonJS({
         pickVaultNote(cb) {
           try {
             if (_hostPickVaultNote) _hostPickVaultNote(cb);
+          } catch (e) {
+          }
+        },
+        // [R31] Arquivos do vault (PDF, vídeo, imagem etc.) — caminho relativo
+        // funciona em qualquer dispositivo porque o vault é sincronizado.
+        listVaultFiles() {
+          try {
+            return _hostListVaultFiles ? _hostListVaultFiles() : [];
+          } catch (e) {
+            return [];
+          }
+        },
+        pickVaultFile(cb) {
+          try {
+            if (_hostPickVaultFile) _hostPickVaultFile(cb);
           } catch (e) {
           }
         },
@@ -8193,11 +8212,12 @@ function abrirModalCaderno(tid, sid, isMateria) {
       </div>
       <div style="margin-bottom:16px">
         <div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text3);margin-bottom:6px">Link</div>
-        <input id="modalLinkInput" type="text" placeholder="https://... ou C:\\\\caminho\\\\arquivo.pdf"
+        <input id="modalLinkInput" type="text" placeholder="https://..., arquivo do vault ou C:\\\\caminho\\\\arquivo.pdf"
           style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
           padding:10px 14px;color:var(--text);font-family:var(--sans);font-size:12px;outline:none;box-sizing:border-box"
           onkeydown="if(event.key==='Enter')confirmarModalCaderno(true)">
         <button id="modalNotaBtn" type="button" onclick="buscarNotaVault('modalLinkInput')" style="display:none;margin-top:8px;padding:8px 12px;border:1px dashed var(--accent);border-radius:8px;background:transparent;color:var(--accent);font-family:var(--sans);font-size:12px;cursor:pointer">\u{1F50D} Buscar nota do vault</button>
+        <button id="modalArquivoBtn" type="button" onclick="buscarArquivoVault('modalLinkInput')" style="margin-top:8px;padding:8px 12px;border:1px dashed var(--accent2);border-radius:8px;background:transparent;color:var(--accent2);font-family:var(--sans);font-size:12px;cursor:pointer">\u{1F4CE} Buscar arquivo do vault (PDF, v\xEDdeo, nota\u2026)</button>
       </div>
       <div id="modalAddFeedback" style="min-height:16px;font-size:11px;color:var(--green);margin-top:-6px;margin-bottom:10px"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -8277,7 +8297,7 @@ function atualizarCamposNotaModal() {
   const li = document.getElementById('modalLinkInput');
   if (li) li.placeholder = tipo.rotulo === 'NOTA'
     ? 'Escolha uma nota do vault com o bot\xE3o acima'
-    : 'https://... ou C:\\\\caminho\\\\arquivo.pdf';
+    : 'https://..., arquivo do vault ou C:\\\\caminho\\\\arquivo.pdf';
 }
 
 function buscarNotaVault(inputId) {
@@ -8374,6 +8394,21 @@ function conectarWikiNoCampo(inputId) {
   input.addEventListener('blur', () => setTimeout(fecharSugestoesWiki, 180));
 }
 
+// [R31] Selecionar QUALQUER arquivo do vault \u2014 caminho relativo Port\xE1til
+// entre computador, celular e tablet (o vault \xE9 sincronizado pelo Syncthing).
+function buscarArquivoVault(inputId) {
+  const h = window.__CT_HOST__;
+  if (!h || typeof h.pickVaultFile !== 'function') {
+    alert('A busca de arquivos do vault requer o host do plugin Track do Oodeus.');
+    return;
+  }
+  h.pickVaultFile(path => {
+    if (!path) return;
+    const li = document.getElementById(inputId);
+    if (li) { li.value = path; li.focus(); }
+  });
+}
+
 function fecharModalCaderno() {
   fecharSugestoesWiki();
   const m = document.getElementById('modalCaderno');
@@ -8388,11 +8423,10 @@ function confirmarModalCaderno(continuar = false) {
   // Remove aspas no in\xEDcio e no fim
   url = url.replace(/^["']+|["']+$/g, '');
   
-  // Se for um caminho do Windows (come\xE7a com letra de unidade e barra)
-  if (/^[a-zA-Z]:[\\\\/]/.test(url)) {
-    // Converte barras invertidas para barras normais e adiciona prefixo file:///
-    url = 'file:///' + url.replace(/\\\\/g, '/');
-  }
+  // [R31] Normaliza\xE7\xE3o universal: Windows \u2192 file:///, Android/POSIX \u2192 file://,
+  // caminho relativo do vault permanece como est\xE1 (mesmo arquivo em todos os
+  // dispositivos), https intacto.
+  url = normalizarUrlMaterialInput(url);
 
   if (!url || url === 'https://') { 
     linkInput.style.borderColor = 'var(--red)';
@@ -8402,7 +8436,7 @@ function confirmarModalCaderno(continuar = false) {
   const tipo = CADERNO_TIPOS[_modalTipoSel];
   // [ADI\xC7\xC3O OODEUS] NOTA: url \xE9 o caminho da nota no vault (n\xE3o \xE9 URL externa \u2014
   // a checagem de seguran\xE7a \xE9 para links http/file)
-  const info = (tipo.rotulo === 'NOTA' || ehLinkWiki(url))
+  const info = (tipo.rotulo === 'NOTA' || ehLinkWiki(url) || ehCaminhoVaultInterno(url))
     ? { ok: true, url }
     : (CT._safeMaterialUrlInfo
         ? CT._safeMaterialUrlInfo(url, { allowInternalFlash: tipo.rotulo === 'FLASH' })
@@ -8569,10 +8603,27 @@ function abrirEditarMaterialPopup(tid, sid, materialId) {
   setTimeout(() => document.getElementById('editMaterialNome')?.focus(), 30);
 }
 
+// [R31] Caminho relativo dentro do vault (ex.: "Materiais/aula.pdf") \xE9
+// universal: o mesmo arquivo existe em todos os dispositivos que sincronizam
+// o cofre. Wikilinks [[Nota]] e links obsidian:// tamb\xE9m entram aqui.
+function ehCaminhoVaultInterno(url) {
+  const raw = String(url || '').trim();
+  if (/^\\[\\[[^\\]]+\\]\\]$/.test(raw)) return true;
+  if (/^obsidian:\\/\\//i.test(raw)) return true;
+  if (/^[a-zA-Z][\\w+.-]*:/.test(raw)) return false; // tem esquema (https:, file:, content:\u2026)
+  if (/^[/\\\\]/.test(raw)) return false;             // absoluto do SO
+  return /\\.(pdf|html?|mp4|webm|mkv|avi|mov|m4v|wmv|png|jpe?g|gif|md)(?:[?#].*)?$/i.test(raw);
+}
+
 function normalizarUrlMaterialInput(url) {
   let normalized = String(url || '').trim().replace(/^["']+|["']+$/g, '');
+  if (!normalized) return normalized;
   if (/^[a-zA-Z]:[\\\\/]/.test(normalized)) {
     normalized = 'file:///' + normalized.replace(/\\\\/g, '/');
+  } else if (/^[/\\\\][^/\\\\]/.test(normalized)) {
+    // Caminho absoluto POSIX/Android (/storage/..., /home/...) tamb\xE9m vira
+    // file:// \u2014 antes s\xF3 o Windows era convertido e o celular ca\xEDa no "https".
+    normalized = 'file://' + normalized.replace(/\\\\/g, '/');
   }
   return normalized;
 }
@@ -8592,7 +8643,7 @@ function salvarEdicaoMaterialPopup(tid, sid, materialId) {
     return;
   }
 
-  const info = (tipo.rotulo === 'NOTA' || ehLinkWiki(url))
+  const info = (tipo.rotulo === 'NOTA' || ehLinkWiki(url) || ehCaminhoVaultInterno(url))
     ? { ok: true, url } // [ADI\xC7\xC3O OODEUS] caminho/wikilink da nota n\xE3o \xE9 URL externa
     : (CT._safeMaterialUrlInfo
         ? CT._safeMaterialUrlInfo(url, { allowInternalFlash: tipo.rotulo === 'FLASH' })
@@ -8780,10 +8831,10 @@ async function abrirCaderno(event, url, rotulo) {
   const tipo = String(rotulo || '').trim().toUpperCase();
   // [ADI\xC7\xC3O OODEUS/R24] NOTA e wikilink [[...]] abrem internamente no Obsidian
   // (workspace.openLinkText via host) \u2014 antes da checagem de URL externa.
-  if (tipo === 'NOTA' || ehLinkWiki(url)) {
+  if (tipo === 'NOTA' || ehLinkWiki(url) || ehCaminhoVaultInterno(url)) {
     const h = window.__CT_HOST__;
     if (h && typeof h.openVaultNote === 'function') {
-      h.openVaultNote(tipo === 'NOTA' ? String(url || '').trim() : notaDeLinkWiki(url));
+      h.openVaultNote(ehLinkWiki(url) ? notaDeLinkWiki(url) : String(url || '').trim());
     } else {
       alert('Abrir notas do vault requer o host do plugin Track do Oodeus.');
     }
@@ -38036,7 +38087,27 @@ var require_vault_notes = __commonJS({
         if (this._onPick && path) this._onPick(String(path));
       }
     };
-    module2.exports = { VaultNoteModal: VaultNoteModal2 };
+    var VaultFileModal2 = class extends FuzzySuggestModal {
+      constructor(app, onPick) {
+        super(app);
+        this._onPick = typeof onPick === "function" ? onPick : null;
+        this.setPlaceholder("Escolha um arquivo do vault (PDF, v\xEDdeo, nota\u2026)\u2026");
+      }
+      getItems() {
+        try {
+          return this.app.vault.getFiles().map((f) => f.path);
+        } catch (e) {
+          return [];
+        }
+      }
+      getItemText(path) {
+        return String(path || "");
+      }
+      onChooseItem(path) {
+        if (this._onPick && path) this._onPick(String(path));
+      }
+    };
+    module2.exports = { VaultNoteModal: VaultNoteModal2, VaultFileModal: VaultFileModal2 };
   }
 });
 
@@ -43435,7 +43506,7 @@ var { Plugin, Notice } = require("obsidian");
 var { initHost } = require_host();
 var { VIEW_TYPE, PAGES, TrackPageView } = require_shell();
 var EMBEDDED_ASSETS = require_assets_embedded();
-var { VaultNoteModal } = require_vault_notes();
+var { VaultNoteModal, VaultFileModal } = require_vault_notes();
 module.exports = class TrackOodeusPlugin extends Plugin {
   async onload() {
     const data = await this.loadData() || {};
@@ -43462,6 +43533,10 @@ module.exports = class TrackOodeusPlugin extends Plugin {
       // fuzzy/abertura interna de notas do vault via workspace.openLinkText.
       listVaultNotes: () => this.app.vault.getMarkdownFiles().map((f) => f.path),
       pickVaultNote: (cb) => new VaultNoteModal(this.app, cb).open(),
+      // [R31] Qualquer arquivo do vault (PDF/vídeo/imagem/nota): o caminho
+      // relativo é o mesmo no PC, celular e tablet — sem depender de https://.
+      listVaultFiles: () => this.app.vault.getFiles().map((f) => f.path),
+      pickVaultFile: (cb) => new VaultFileModal(this.app, cb).open(),
       // [R24] Abrir NOTA/wikilink: resolver para um arquivo EXISTENTE antes.
       // `openLinkText(texto, '', true)` cria uma nota nova quando o link não
       // resolve — era o que acontecia ao clicar no material (o Oodeus via

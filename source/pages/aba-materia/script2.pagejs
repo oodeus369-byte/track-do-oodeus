@@ -1751,11 +1751,12 @@ function abrirModalCaderno(tid, sid, isMateria) {
       </div>
       <div style="margin-bottom:16px">
         <div style="font-size:12px;font-weight:700;letter-spacing:1px;text-transform:uppercase;color:var(--text3);margin-bottom:6px">Link</div>
-        <input id="modalLinkInput" type="text" placeholder="https://... ou C:\\caminho\\arquivo.pdf"
+        <input id="modalLinkInput" type="text" placeholder="https://..., arquivo do vault ou C:\\caminho\\arquivo.pdf"
           style="width:100%;background:var(--bg3);border:1px solid var(--border2);border-radius:8px;
           padding:10px 14px;color:var(--text);font-family:var(--sans);font-size:12px;outline:none;box-sizing:border-box"
           onkeydown="if(event.key==='Enter')confirmarModalCaderno(true)">
         <button id="modalNotaBtn" type="button" onclick="buscarNotaVault('modalLinkInput')" style="display:none;margin-top:8px;padding:8px 12px;border:1px dashed var(--accent);border-radius:8px;background:transparent;color:var(--accent);font-family:var(--sans);font-size:12px;cursor:pointer">🔍 Buscar nota do vault</button>
+        <button id="modalArquivoBtn" type="button" onclick="buscarArquivoVault('modalLinkInput')" style="margin-top:8px;padding:8px 12px;border:1px dashed var(--accent2);border-radius:8px;background:transparent;color:var(--accent2);font-family:var(--sans);font-size:12px;cursor:pointer">📎 Buscar arquivo do vault (PDF, vídeo, nota…)</button>
       </div>
       <div id="modalAddFeedback" style="min-height:16px;font-size:11px;color:var(--green);margin-top:-6px;margin-bottom:10px"></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap">
@@ -1835,7 +1836,7 @@ function atualizarCamposNotaModal() {
   const li = document.getElementById('modalLinkInput');
   if (li) li.placeholder = tipo.rotulo === 'NOTA'
     ? 'Escolha uma nota do vault com o botão acima'
-    : 'https://... ou C:\\caminho\\arquivo.pdf';
+    : 'https://..., arquivo do vault ou C:\\caminho\\arquivo.pdf';
 }
 
 function buscarNotaVault(inputId) {
@@ -1932,6 +1933,21 @@ function conectarWikiNoCampo(inputId) {
   input.addEventListener('blur', () => setTimeout(fecharSugestoesWiki, 180));
 }
 
+// [R31] Selecionar QUALQUER arquivo do vault — caminho relativo Portátil
+// entre computador, celular e tablet (o vault é sincronizado pelo Syncthing).
+function buscarArquivoVault(inputId) {
+  const h = window.__CT_HOST__;
+  if (!h || typeof h.pickVaultFile !== 'function') {
+    alert('A busca de arquivos do vault requer o host do plugin Track do Oodeus.');
+    return;
+  }
+  h.pickVaultFile(path => {
+    if (!path) return;
+    const li = document.getElementById(inputId);
+    if (li) { li.value = path; li.focus(); }
+  });
+}
+
 function fecharModalCaderno() {
   fecharSugestoesWiki();
   const m = document.getElementById('modalCaderno');
@@ -1946,11 +1962,10 @@ function confirmarModalCaderno(continuar = false) {
   // Remove aspas no início e no fim
   url = url.replace(/^["']+|["']+$/g, '');
   
-  // Se for um caminho do Windows (começa com letra de unidade e barra)
-  if (/^[a-zA-Z]:[\\/]/.test(url)) {
-    // Converte barras invertidas para barras normais e adiciona prefixo file:///
-    url = 'file:///' + url.replace(/\\/g, '/');
-  }
+  // [R31] Normalização universal: Windows → file:///, Android/POSIX → file://,
+  // caminho relativo do vault permanece como está (mesmo arquivo em todos os
+  // dispositivos), https intacto.
+  url = normalizarUrlMaterialInput(url);
 
   if (!url || url === 'https://') { 
     linkInput.style.borderColor = 'var(--red)';
@@ -1960,7 +1975,7 @@ function confirmarModalCaderno(continuar = false) {
   const tipo = CADERNO_TIPOS[_modalTipoSel];
   // [ADIÇÃO OODEUS] NOTA: url é o caminho da nota no vault (não é URL externa —
   // a checagem de segurança é para links http/file)
-  const info = (tipo.rotulo === 'NOTA' || ehLinkWiki(url))
+  const info = (tipo.rotulo === 'NOTA' || ehLinkWiki(url) || ehCaminhoVaultInterno(url))
     ? { ok: true, url }
     : (CT._safeMaterialUrlInfo
         ? CT._safeMaterialUrlInfo(url, { allowInternalFlash: tipo.rotulo === 'FLASH' })
@@ -2127,10 +2142,27 @@ function abrirEditarMaterialPopup(tid, sid, materialId) {
   setTimeout(() => document.getElementById('editMaterialNome')?.focus(), 30);
 }
 
+// [R31] Caminho relativo dentro do vault (ex.: "Materiais/aula.pdf") é
+// universal: o mesmo arquivo existe em todos os dispositivos que sincronizam
+// o cofre. Wikilinks [[Nota]] e links obsidian:// também entram aqui.
+function ehCaminhoVaultInterno(url) {
+  const raw = String(url || '').trim();
+  if (/^\[\[[^\]]+\]\]$/.test(raw)) return true;
+  if (/^obsidian:\/\//i.test(raw)) return true;
+  if (/^[a-zA-Z][\w+.-]*:/.test(raw)) return false; // tem esquema (https:, file:, content:…)
+  if (/^[/\\]/.test(raw)) return false;             // absoluto do SO
+  return /\.(pdf|html?|mp4|webm|mkv|avi|mov|m4v|wmv|png|jpe?g|gif|md)(?:[?#].*)?$/i.test(raw);
+}
+
 function normalizarUrlMaterialInput(url) {
   let normalized = String(url || '').trim().replace(/^["']+|["']+$/g, '');
+  if (!normalized) return normalized;
   if (/^[a-zA-Z]:[\\/]/.test(normalized)) {
     normalized = 'file:///' + normalized.replace(/\\/g, '/');
+  } else if (/^[/\\][^/\\]/.test(normalized)) {
+    // Caminho absoluto POSIX/Android (/storage/..., /home/...) também vira
+    // file:// — antes só o Windows era convertido e o celular caía no "https".
+    normalized = 'file://' + normalized.replace(/\\/g, '/');
   }
   return normalized;
 }
@@ -2150,7 +2182,7 @@ function salvarEdicaoMaterialPopup(tid, sid, materialId) {
     return;
   }
 
-  const info = (tipo.rotulo === 'NOTA' || ehLinkWiki(url))
+  const info = (tipo.rotulo === 'NOTA' || ehLinkWiki(url) || ehCaminhoVaultInterno(url))
     ? { ok: true, url } // [ADIÇÃO OODEUS] caminho/wikilink da nota não é URL externa
     : (CT._safeMaterialUrlInfo
         ? CT._safeMaterialUrlInfo(url, { allowInternalFlash: tipo.rotulo === 'FLASH' })
@@ -2338,10 +2370,10 @@ async function abrirCaderno(event, url, rotulo) {
   const tipo = String(rotulo || '').trim().toUpperCase();
   // [ADIÇÃO OODEUS/R24] NOTA e wikilink [[...]] abrem internamente no Obsidian
   // (workspace.openLinkText via host) — antes da checagem de URL externa.
-  if (tipo === 'NOTA' || ehLinkWiki(url)) {
+  if (tipo === 'NOTA' || ehLinkWiki(url) || ehCaminhoVaultInterno(url)) {
     const h = window.__CT_HOST__;
     if (h && typeof h.openVaultNote === 'function') {
-      h.openVaultNote(tipo === 'NOTA' ? String(url || '').trim() : notaDeLinkWiki(url));
+      h.openVaultNote(ehLinkWiki(url) ? notaDeLinkWiki(url) : String(url || '').trim());
     } else {
       alert('Abrir notas do vault requer o host do plugin Track do Oodeus.');
     }

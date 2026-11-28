@@ -19,7 +19,7 @@ const { VIEW_TYPE, PAGES, TrackPageView } = require('./src/shell');
 // pasta assets/. Resolver por aqui primeiro mantém todas as imagens funcionando
 // em qualquer cofre; o caminho do vault continua como fallback.
 const EMBEDDED_ASSETS = require('./src/assets-embedded');
-const { VaultNoteModal } = require('./src/vault-notes');
+const { VaultNoteModal, VaultFileModal } = require('./src/vault-notes');
 
 module.exports = class TrackOodeusPlugin extends Plugin {
   async onload() {
@@ -48,6 +48,10 @@ module.exports = class TrackOodeusPlugin extends Plugin {
       // fuzzy/abertura interna de notas do vault via workspace.openLinkText.
       listVaultNotes: () => this.app.vault.getMarkdownFiles().map(f => f.path),
       pickVaultNote: (cb) => new VaultNoteModal(this.app, cb).open(),
+      // [R31] Qualquer arquivo do vault (PDF/vídeo/imagem/nota): o caminho
+      // relativo é o mesmo no PC, celular e tablet — sem depender de https://.
+      listVaultFiles: () => this.app.vault.getFiles().map(f => f.path),
+      pickVaultFile: (cb) => new VaultFileModal(this.app, cb).open(),
       // [R24] Abrir NOTA/wikilink: resolver para um arquivo EXISTENTE antes.
       // `openLinkText(texto, '', true)` cria uma nota nova quando o link não
       // resolve — era o que acontecia ao clicar no material (o Oodeus via

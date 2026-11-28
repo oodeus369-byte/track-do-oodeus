@@ -485,21 +485,20 @@ async function confirmOverlay(w) {
     editModal.querySelector('#editMaterialTipo').value = 'QUEST';
     editModal.querySelector('#editMaterialTipo').dispatchEvent(new w.Event('change', { bubbles: true }));
     check('mudar tipo esconde o botão nota', editModal.querySelector('#editMaterialNotaBtn').style.display === 'none');
-    // salvar com tipo QUEST e caminho de vault: o safe-check ORIGINAL bloqueia
-    // (não é http/file) — fidelidade: alert + material inalterado
+    // [R31] salvar com tipo QUEST e caminho de vault: agora é aceito — o
+    // caminho relativo do vault é universal entre PC/celular/tablet.
     w.salvarEdicaoMaterialPopup('', '', cad.id);
     await tick(30);
-    check('safe-check original bloqueia caminho de vault para tipo não-NOTA', (overlayMessage(w) || '').includes('Link bloqueado'), overlayMessage(w));
-    await confirmOverlay(w);
+    check('caminho do vault aceito para tipo não-NOTA (sem bloqueio)', !(overlayMessage(w) || '').includes('Link bloqueado'), overlayMessage(w));
     const cad2 = (w.CT.getMateria(mId).cadernos || [])[0];
-    check('material inalterado após bloqueio (rotulo/emoji/url NOTA preservados)', cad2.rotulo === 'NOTA' && cad2.emoji === '📝' && cad2.url === 'Concursos/Foco/cronograma-estudo.md', JSON.stringify(cad2));
-    // editar mantendo NOTA: salvar passa pelo bypass do safe-check
+    check('material atualizado para QUEST com url do vault', cad2.rotulo === 'QUEST' && cad2.url === 'Concursos/Foco/cronograma-estudo.md', JSON.stringify(cad2));
+    // editar novamente: nome trocado, url preservada
     w.abrirEditarMaterialPopup('', '', cad.id);
     const edit2 = w.document.getElementById('modalEditarMaterial');
     edit2.querySelector('#editMaterialNome').value = 'Nota renomeada';
     w.salvarEdicaoMaterialPopup('', '', cad.id);
     const cad3 = (w.CT.getMateria(mId).cadernos || [])[0];
-    check('editar NOTA: nome trocado, url preservada (bypass do safe-check)', cad3.nome === 'Nota renomeada' && cad3.rotulo === 'NOTA' && cad3.url === 'Concursos/Foco/cronograma-estudo.md', JSON.stringify(cad3));
+    check('editar: nome trocado, url do vault preservada', cad3.nome === 'Nota renomeada' && cad3.url === 'Concursos/Foco/cronograma-estudo.md', JSON.stringify(cad3));
   }
 
   console.log('== R4-L: drag & drop de tópicos ==');

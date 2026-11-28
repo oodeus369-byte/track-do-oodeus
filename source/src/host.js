@@ -24,9 +24,11 @@ let _hostAssetBase = null;
 let _hostAssetUrl = null;
 let _hostListVaultNotes = null;
 let _hostPickVaultNote = null;
+let _hostListVaultFiles = null;
+let _hostPickVaultFile = null;
 let _hostOpenVaultNote = null;
 
-function initHost({ data = null, persist = null, window: hostWindow, navigate = null, currentPage = null, assetBase = null, assetUrl = null, listVaultNotes = null, pickVaultNote = null, openVaultNote = null } = {}) {
+function initHost({ data = null, persist = null, window: hostWindow, navigate = null, currentPage = null, assetBase = null, assetUrl = null, listVaultNotes = null, pickVaultNote = null, listVaultFiles = null, pickVaultFile = null, openVaultNote = null } = {}) {
   _hostData = data && typeof data === 'object' ? data : {};
   _hostPersist = typeof persist === 'function' ? persist : null;
   _hostNavigate = typeof navigate === 'function' ? navigate : null;
@@ -35,6 +37,8 @@ function initHost({ data = null, persist = null, window: hostWindow, navigate = 
   _hostAssetUrl = typeof assetUrl === 'function' ? assetUrl : null;
   _hostListVaultNotes = typeof listVaultNotes === 'function' ? listVaultNotes : null;
   _hostPickVaultNote = typeof pickVaultNote === 'function' ? pickVaultNote : null;
+  _hostListVaultFiles = typeof listVaultFiles === 'function' ? listVaultFiles : null;
+  _hostPickVaultFile = typeof pickVaultFile === 'function' ? pickVaultFile : null;
   _hostOpenVaultNote = typeof openVaultNote === 'function' ? openVaultNote : null;
   _hostLoaded = true;
 
@@ -133,6 +137,22 @@ function initHost({ data = null, persist = null, window: hostWindow, navigate = 
     pickVaultNote(cb) {
       try {
         if (_hostPickVaultNote) _hostPickVaultNote(cb);
+      } catch { /* seletor indisponível — callback fica pendente */ }
+    },
+
+    // [R31] Arquivos do vault (PDF, vídeo, imagem etc.) — caminho relativo
+    // funciona em qualquer dispositivo porque o vault é sincronizado.
+    listVaultFiles() {
+      try {
+        return _hostListVaultFiles ? _hostListVaultFiles() : [];
+      } catch {
+        return [];
+      }
+    },
+
+    pickVaultFile(cb) {
+      try {
+        if (_hostPickVaultFile) _hostPickVaultFile(cb);
       } catch { /* seletor indisponível — callback fica pendente */ }
     },
 

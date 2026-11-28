@@ -31,4 +31,32 @@ class VaultNoteModal extends FuzzySuggestModal {
   }
 }
 
-module.exports = { VaultNoteModal };
+// [R31] Seletor de QUALQUER arquivo do vault (PDF, vídeo, imagem, markdown).
+// Diferente do VaultNoteModal, que só lista notas .md, este permite escolher
+// um arquivo que existe dentro do cofre — caminho relativo, portátil entre
+// computador, celular e tablet.
+class VaultFileModal extends FuzzySuggestModal {
+  constructor(app, onPick) {
+    super(app);
+    this._onPick = typeof onPick === 'function' ? onPick : null;
+    this.setPlaceholder('Escolha um arquivo do vault (PDF, vídeo, nota…)…');
+  }
+
+  getItems() {
+    try {
+      return this.app.vault.getFiles().map(f => f.path);
+    } catch {
+      return [];
+    }
+  }
+
+  getItemText(path) {
+    return String(path || '');
+  }
+
+  onChooseItem(path) {
+    if (this._onPick && path) this._onPick(String(path));
+  }
+}
+
+module.exports = { VaultNoteModal, VaultFileModal };
