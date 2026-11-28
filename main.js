@@ -8300,13 +8300,40 @@ function atualizarCamposNotaModal() {
     : 'https://..., arquivo do vault ou C:\\\\caminho\\\\arquivo.pdf';
 }
 
+// [R33] Nosso modal de material tem z-index 9999; o seletor fuzzy do Obsidian
+// usa z-index 50. Enquanto o seletor est\xE1 aberto, abaixamos o nosso modal para
+// que a lista de notas/arquivos fique VIS\xCDVEL e clic\xE1vel. Restauramos no
+// callback, no Escape ou quando o modal do Obsidian desaparece.
+function __loweringModalParaPicker() {
+  const m = document.getElementById('modalCaderno');
+  if (!m) return function () {};
+  const old = m.style.zIndex || '';
+  m.style.zIndex = '1';
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    m.style.zIndex = old;
+    document.removeEventListener('keydown', onKey, true);
+    clearInterval(timer);
+    clearTimeout(safety);
+  };
+  const onKey = e => { if (e.key === 'Escape') setTimeout(restore, 150); };
+  document.addEventListener('keydown', onKey, true);
+  const timer = setInterval(() => { if (!document.querySelector('.modal-container')) restore(); }, 300);
+  const safety = setTimeout(restore, 60000);
+  return restore;
+}
+
 function buscarNotaVault(inputId) {
   const h = window.__CT_HOST__;
   if (!h || typeof h.pickVaultNote !== 'function') {
     alert('A busca de notas do vault requer o host do plugin Track do Oodeus.');
     return;
   }
+  const restore = __loweringModalParaPicker();
   h.pickVaultNote(path => {
+    restore();
     if (!path) return;
     const li = document.getElementById(inputId);
     if (li) { li.value = path; li.focus(); }
@@ -8402,7 +8429,9 @@ function buscarArquivoVault(inputId) {
     alert('A busca de arquivos do vault requer o host do plugin Track do Oodeus.');
     return;
   }
+  const restore = __loweringModalParaPicker();
   h.pickVaultFile(path => {
+    restore();
     if (!path) return;
     const li = document.getElementById(inputId);
     if (li) { li.value = path; li.focus(); }
